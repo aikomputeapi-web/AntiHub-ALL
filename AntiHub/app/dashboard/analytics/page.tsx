@@ -50,11 +50,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import Toaster, { type ToasterRef } from '@/components/ui/toast';
 import { Gemini, OpenAI, Qwen } from '@lobehub/icons';
+import { IconBrandGithub } from '@tabler/icons-react';
 
 type ConfigType =
   | 'antigravity'
   | 'kiro'
   | 'qwen'
+  | 'copilot'
   | 'codex'
   | 'gemini-cli'
   | 'zai-tts'
@@ -206,15 +208,17 @@ export default function AnalyticsPage() {
       ? 'Antigravity'
       : activeTab === 'kiro'
         ? 'Kiro'
-        : activeTab === 'codex'
-          ? 'Codex'
-          : activeTab === 'gemini-cli'
-            ? 'GeminiCLI'
-            : activeTab === 'zai-tts'
-              ? 'ZAI TTS'
-              : activeTab === 'zai-image'
-                ? 'ZAI Image'
-                : 'Qwen';
+        : activeTab === 'copilot'
+          ? 'Copilot'
+          : activeTab === 'codex'
+            ? 'Codex'
+            : activeTab === 'gemini-cli'
+              ? 'GeminiCLI'
+              : activeTab === 'zai-tts'
+                ? 'ZAI TTS'
+                : activeTab === 'zai-image'
+                  ? 'ZAI Image'
+                  : 'Qwen';
 
   const isFirstLoadForTab = requestLogs.length === 0 && !requestStats;
 
@@ -259,6 +263,11 @@ export default function AnalyticsPage() {
                     <Qwen className="size-4" />
                     Qwen
                   </span>
+                ) : activeTab === 'copilot' ? (
+                  <span className="flex items-center gap-2">
+                    <IconBrandGithub className="size-4" />
+                    Copilot
+                  </span>
                 ) : activeTab === 'zai-tts' ? (
                   <span className="flex items-center gap-2">
                     <OpenAI className="size-4" />
@@ -299,6 +308,12 @@ export default function AnalyticsPage() {
                 <span className="flex items-center gap-2">
                   <Qwen className="size-4" />
                   Qwen
+                </span>
+              </SelectItem>
+              <SelectItem value="copilot">
+                <span className="flex items-center gap-2">
+                  <IconBrandGithub className="size-4" />
+                  Copilot
                 </span>
               </SelectItem>
               <SelectItem value="zai-tts">

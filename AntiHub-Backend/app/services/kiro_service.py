@@ -572,20 +572,37 @@ class KiroService:
             auth_method = "Social"
         elif auth_method_lower in ("idc", "iam", "ima", "builder-id", "builderid", "aws-ima"):
             auth_method = "IdC"
-        if auth_method not in ("Social", "IdC"):
-            raise UpstreamAPIError(status_code=400, message="auth_method must be Social or IdC")
+        elif auth_method_lower in ("external_idp", "externalidp", "external-idp"):
+            auth_method = "ExternalIdp"
+        if auth_method not in ("Social", "IdC", "ExternalIdp"):
+            raise UpstreamAPIError(status_code=400, message="auth_method must be Social, IdC or ExternalIdp")
 
         client_id = _trimmed_str(account_data.get("client_id") or account_data.get("clientId"))
         client_secret = _trimmed_str(account_data.get("client_secret") or account_data.get("clientSecret"))
         if auth_method == "IdC" and (not client_id or not client_secret):
             raise UpstreamAPIError(status_code=400, message="IdC requires client_id and client_secret")
+        if auth_method == "ExternalIdp" and not client_id:
+            raise UpstreamAPIError(status_code=400, message="ExternalIdp requires client_id")
+        token_endpoint = _trimmed_str(account_data.get("token_endpoint") or account_data.get("tokenEndpoint"))
+        if auth_method == "ExternalIdp" and not token_endpoint:
+            raise UpstreamAPIError(status_code=400, message="ExternalIdp requires token_endpoint")
+        issuer_url = _trimmed_str(account_data.get("issuer_url") or account_data.get("issuerUrl"))
+        ext_scopes = _trimmed_str(account_data.get("scopes"))
+
+        # ExternalIdp: default scopes to Kiro API scopes if not provided
+        if auth_method == "ExternalIdp" and not ext_scopes:
+            ext_scopes = (
+                f"api://{client_id}/codewhisperer:conversations "
+                f"api://{client_id}/codewhisperer:completions "
+                "offline_access"
+            )
 
         account_name = _trimmed_str(account_data.get("account_name") or account_data.get("accountName")) or "Kiro Account"
         machineid = _trimmed_str(account_data.get("machineid") or account_data.get("machineId")) or None
         region = _trimmed_str(account_data.get("region")) or "us-east-1"
         auth_region = _trimmed_str(account_data.get("auth_region") or account_data.get("authRegion")) or None
         api_region = _trimmed_str(account_data.get("api_region") or account_data.get("apiRegion")) or None
-        if auth_method == "IdC" and not api_region:
+        if auth_method in ("IdC", "ExternalIdp") and not api_region:
             # Kiro/Amazon Q Developer API region is typically us-east-1 even when SSO/OIDC auth region differs.
             api_region = "us-east-1"
         if auth_method == "IdC" and not auth_region:
@@ -638,6 +655,12 @@ class KiroService:
             credentials_payload["provider"] = provider
         if expires_in is not None:
             credentials_payload["expires_in"] = expires_in
+        if token_endpoint:
+            credentials_payload["token_endpoint"] = token_endpoint
+        if issuer_url:
+            credentials_payload["issuer_url"] = issuer_url
+        if ext_scopes:
+            credentials_payload["scopes"] = ext_scopes
         encrypted_credentials = encrypt_api_key(json.dumps(credentials_payload, ensure_ascii=False))
 
         account = KiroAccount(
@@ -661,24 +684,42 @@ class KiroService:
 
         # Validate credentials before persisting.
         # If upstream rejects the token (401/403), do NOT insert into DB.
-        try:
-            await self._refresh_account_usage_limits_from_upstream(account)
-        except UpstreamAPIError:
-            raise
-        except ValueError as e:
-            # Token refresh helpers currently raise ValueError; normalize to UpstreamAPIError
-            # so the API layer can surface a consistent {error, type} payload.
-            msg = str(e or "").strip() or "token validation failed"
-            status_code = 400
-            m = re.search(r"HTTP\s+(\d{3})", msg)
-            if m:
-                try:
-                    candidate = int(m.group(1))
-                    if 400 <= candidate <= 599:
-                        status_code = candidate
-                except Exception:
-                    status_code = 400
-            raise UpstreamAPIError(status_code=status_code, message=msg)
+        # ExternalIdp accounts skip getUsageLimits validation because the Azure AD
+        # JWT is not accepted by AWS usage-limits endpoints; actual chat requests
+        # are proxied differently and work fine with the Azure AD token.
+        if auth_method != "ExternalIdp":
+            try:
+                await self._refresh_account_usage_limits_from_upstream(account)
+            except UpstreamAPIError:
+                raise
+            except ValueError as e:
+                # Token refresh helpers currently raise ValueError; normalize to UpstreamAPIError
+                # so the API layer can surface a consistent {error, type} payload.
+                msg = str(e or "").strip() or "token validation failed"
+                status_code = 400
+                m = re.search(r"HTTP\s+(\d{3})", msg)
+                if m:
+                    try:
+                        candidate = int(m.group(1))
+                        if 400 <= candidate <= 599:
+                            status_code = candidate
+                    except Exception:
+                        status_code = 400
+                raise UpstreamAPIError(status_code=status_code, message=msg)
+        else:
+            # For ExternalIdp: just do a token refresh to verify the credentials are valid,
+            # but don't call getUsageLimits.
+            proxy_url = self._get_kiro_proxy_url()
+            timeout = httpx.Timeout(30.0, connect=10.0)
+            client_kwargs: Dict[str, Any] = {"timeout": timeout}
+            if proxy_url:
+                client_kwargs["proxies"] = proxy_url
+            try:
+                async with httpx.AsyncClient(**client_kwargs) as client:
+                    await self._ensure_valid_access_token(client=client, account=account)
+            except ValueError as e:
+                msg = str(e or "").strip() or "token validation failed"
+                raise UpstreamAPIError(status_code=400, message=msg)
 
         self.db.add(account)
         await self.db.flush()
@@ -730,6 +771,10 @@ class KiroService:
             "email": account.email,
             "subscription": account.subscription,
             "subscription_type": account.subscription_type,
+            # ExternalIdp-specific fields
+            "token_endpoint": creds.get("token_endpoint"),
+            "issuer_url": creds.get("issuer_url"),
+            "scopes": creds.get("scopes"),
         }
         data = {k: v for k, v in export.items() if v is not None and not (isinstance(v, str) and not v.strip())}
         return {"success": True, "data": data}
@@ -775,7 +820,7 @@ class KiroService:
         assert updated is not None
         return {"success": True, "message": "账号名称已更新", "data": _account_to_safe_dict(updated)}
     
-    def _build_kiro_usage_limits_headers(self, *, token: str, machineid: str) -> Dict[str, str]:
+    def _build_kiro_usage_limits_headers(self, *, token: str, machineid: str, auth_method: str = "") -> Dict[str, str]:
         """
         Headers for getUsageLimits (CodeWhisperer runtime) requests.
 
@@ -788,7 +833,7 @@ class KiroService:
             f"api/codewhispererruntime#1.0.0 m/E KiroIDE-{ide_version}-{mid}"
         )
         amz_user_agent = f"aws-sdk-js/1.0.0 KiroIDE-{ide_version}-{mid}"
-        return {
+        headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
             "User-Agent": user_agent,
@@ -797,6 +842,9 @@ class KiroService:
             "amz-sdk-request": "attempt=1; max=1",
             "Connection": "close",
         }
+        if auth_method == "ExternalIdp":
+            headers["TokenType"] = "EXTERNAL_IDP"
+        return headers
 
     @staticmethod
     def _pick_usage_breakdown(value: Any) -> Optional[Dict[str, Any]]:
@@ -1022,7 +1070,7 @@ class KiroService:
             if profile_arn:
                 params["profileArn"] = profile_arn
 
-            headers_template = self._build_kiro_usage_limits_headers(token=access_token, machineid=machineid)
+            headers_template = self._build_kiro_usage_limits_headers(token=access_token, machineid=machineid, auth_method=account.auth_method or "")
 
             best_error: Optional[UpstreamAPIError] = None
 
@@ -1335,7 +1383,10 @@ class KiroService:
             return cls._coerce_region(value)
 
         auth_method = _trimmed_str(account.auth_method or creds.get("auth_method") or creds.get("authMethod"))
-        if auth_method and auth_method.lower() in ("idc", "iam", "ima", "builder-id", "builderid", "aws-ima"):
+        if auth_method and auth_method.lower() in (
+            "idc", "iam", "ima", "builder-id", "builderid", "aws-ima",
+            "external_idp", "externalidp", "external-idp",
+        ):
             return "us-east-1"
 
         return cls._coerce_region(account.region or creds.get("region"))
@@ -1760,6 +1811,73 @@ class KiroService:
                     new_token = _trimmed_str(data.get("accessToken") or data.get("access_token"))
                     new_refresh = _trimmed_str(data.get("refreshToken") or data.get("refresh_token")) or None
                     expires_in = data.get("expiresIn") if isinstance(data.get("expiresIn"), int) else None
+            elif auth_method.lower() in ("externalidp", "external_idp"):
+                # External IdP (e.g. Microsoft Entra ID / Azure AD):
+                # The Azure AD access_token (JWT) is used DIRECTLY as the Bearer token
+                # for AWS Q / CodeWhisperer API calls. No SSO OIDC involvement.
+                # Refresh via the external IdP's OAuth2 token endpoint.
+
+                ext_token_endpoint = _trimmed_str(creds.get("token_endpoint") or creds.get("tokenEndpoint"))
+                ext_client_id = _trimmed_str(creds.get("client_id") or creds.get("clientId"))
+                ext_client_secret = _trimmed_str(creds.get("client_secret") or creds.get("clientSecret"))
+                ext_scopes = _trimmed_str(creds.get("scopes"))
+
+                if not ext_token_endpoint or not ext_client_id:
+                    raise ValueError(
+                        "ExternalIdp account missing token_endpoint or client_id. "
+                        "Please re-import with correct credentials."
+                    )
+
+                # Default scopes to Kiro API scopes if not provided
+                if not ext_scopes:
+                    ext_scopes = (
+                        f"api://{ext_client_id}/codewhisperer:conversations "
+                        f"api://{ext_client_id}/codewhisperer:completions "
+                        "offline_access"
+                    )
+
+                form_data: Dict[str, str] = {
+                    "client_id": ext_client_id,
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                    "scope": ext_scopes,
+                }
+                if ext_client_secret:
+                    form_data["client_secret"] = ext_client_secret
+
+                idp_headers = {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "application/json",
+                    "User-Agent": "KiroIDE",
+                }
+
+                logger.info(
+                    "[ExternalIdp] Refreshing Azure AD token via %s client_id=%s",
+                    ext_token_endpoint, ext_client_id,
+                )
+
+                resp = await client.post(
+                    ext_token_endpoint, data=form_data, headers=idp_headers, timeout=30.0
+                )
+                if resp.status_code >= 400:
+                    body = resp.text[:2000]
+                    context = f"token_endpoint={ext_token_endpoint}, client_id={ext_client_id}"
+                    account.need_refresh = True
+                    raise ValueError(
+                        f"ExternalIdp token refresh failed: HTTP {resp.status_code} {body} ({context})"
+                    )
+
+                data = resp.json()
+                if isinstance(data, dict):
+                    # The Azure AD access_token IS the Bearer token for AWS APIs
+                    new_token = _trimmed_str(data.get("access_token"))
+                    new_refresh = _trimmed_str(data.get("refresh_token")) or None
+                    raw_expires_in = data.get("expires_in")
+                    expires_in = int(raw_expires_in) if isinstance(raw_expires_in, (int, float)) and raw_expires_in > 0 else None
+                    logger.info(
+                        "[ExternalIdp] Azure AD refresh OK, token_prefix=%s expires_in=%s",
+                        (new_token or "")[:12], expires_in,
+                    )
             else:
                 url = f"https://prod.{auth_region}.auth.desktop.kiro.dev/refreshToken"
                 host = f"prod.{auth_region}.auth.desktop.kiro.dev"
@@ -1817,7 +1935,7 @@ class KiroService:
             f"https://codewhisperer.{region}.amazonaws.com",
         ]
 
-    def _build_kiro_headers(self, *, token: str, machineid: str) -> Dict[str, str]:
+    def _build_kiro_headers(self, *, token: str, machineid: str, auth_method: str = "") -> Dict[str, str]:
         ide_version = self._get_kiro_ide_version()
         mid = (machineid or "")[:32] or secrets.token_hex(16)
         user_agent = (
@@ -1826,9 +1944,10 @@ class KiroService:
         )
         amz_user_agent = f"aws-sdk-js/1.0.27 KiroIDE-{ide_version}-{mid}"
 
-        return {
+        headers = {
             "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
+            "Content-Type": "application/x-amz-json-1.0",
+            "x-amz-target": "AmazonCodeWhispererStreamingService.GenerateAssistantResponse",
             "User-Agent": user_agent,
             "x-amz-user-agent": amz_user_agent,
             "x-amzn-codewhisperer-optout": "true",
@@ -1837,6 +1956,11 @@ class KiroService:
             "amz-sdk-request": "attempt=1; max=3",
             "Connection": "close",
         }
+        # External IdP (Azure AD / Microsoft Entra) requires this header so
+        # the AWS backend recognises the Microsoft OAuth2 JWT.
+        if auth_method == "ExternalIdp":
+            headers["TokenType"] = "EXTERNAL_IDP"
+        return headers
 
     async def _stream_generate_assistant_response_as_openai(
         self,
@@ -2287,7 +2411,12 @@ class KiroService:
                     yield _openai_sse_done()
                     return
 
-                headers = self._build_kiro_headers(token=access_token, machineid=machineid)
+                headers = self._build_kiro_headers(token=access_token, machineid=machineid, auth_method=account.auth_method or "")
+                logger.info(
+                    "[Kiro chat] account=%s auth_method=%s api_region=%s token_prefix=%s profile_arn=%s",
+                    account.account_id[:8], account.auth_method, api_region,
+                    (access_token or "")[:12], profile_arn,
+                )
 
                 base_urls = self._kiro_api_base_urls(api_region)
                 is_enterprise = _trimmed_str(creds.get("provider")).lower() == "enterprise"

@@ -10,6 +10,7 @@ from app.api.routes.usage import router as usage_router
 from app.api.routes.kiro import router as kiro_router
 from app.api.routes.kiro_aws_idc import router as kiro_aws_idc_router
 from app.api.routes.kiro_enterprise import router as kiro_enterprise_router
+from app.api.routes.kiro_external_idp import router as kiro_external_idp_router
 from app.api.routes.qwen import router as qwen_router
 from app.api.routes.anthropic import router as anthropic_router
 from app.api.routes.anthropic import cc_router as anthropic_cc_router
@@ -18,6 +19,7 @@ from app.api.routes.codex import router as codex_router
 from app.api.routes.gemini_cli import router as gemini_cli_router
 from app.api.routes.zai_tts import router as zai_tts_router
 from app.api.routes.zai_image import router as zai_image_router
+from app.api.routes.copilot import router as copilot_router
 from app.api.routes.settings import router as settings_router
 
 __all__ = [
@@ -30,6 +32,7 @@ __all__ = [
     "kiro_router",
     "kiro_aws_idc_router",
     "kiro_enterprise_router",
+    "kiro_external_idp_router",
     "qwen_router",
     "anthropic_router",
     "anthropic_cc_router",
@@ -38,5 +41,6 @@ __all__ = [
     "gemini_cli_router",
     "zai_tts_router",
     "zai_image_router",
+    "copilot_router",
     "settings_router",
 ]

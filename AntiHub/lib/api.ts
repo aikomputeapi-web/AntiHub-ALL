@@ -960,7 +960,7 @@ export interface PluginAPIKey {
   user_id: number;
   key_preview: string;
   name: string;
-  config_type: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image'; // 配置类型
+  config_type: 'antigravity' | 'kiro' | 'qwen' | 'copilot' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image'; // 配置类型
   is_active: boolean;
   created_at: string;
   last_used_at: string | null;
@@ -972,7 +972,7 @@ export interface CreateAPIKeyResponse {
   user_id: number;
   key: string;
   name: string;
-  config_type: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image'; // 配置类型
+  config_type: 'antigravity' | 'kiro' | 'qwen' | 'copilot' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image'; // 配置类型
   is_active: boolean;
   created_at: string;
   last_used_at: string | null;
@@ -1013,7 +1013,7 @@ export async function getAPIKey(keyId: number): Promise<CreateAPIKeyResponse> {
  */
 export async function generateAPIKey(
   name: string = 'My API Key',
-  configType: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image' = 'antigravity'
+  configType: 'antigravity' | 'kiro' | 'qwen' | 'copilot' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image' = 'antigravity'
 ): Promise<CreateAPIKeyResponse> {
   return fetchWithAuth<CreateAPIKeyResponse>(
     `${API_BASE_URL}/api/api-keys`,
@@ -1039,7 +1039,7 @@ export async function deleteAPIKey(keyId: number): Promise<any> {
  */
 export async function updateAPIKeyType(
   keyId: number,
-  configType: 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image'
+  configType: 'antigravity' | 'kiro' | 'qwen' | 'copilot' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image'
 ): Promise<CreateAPIKeyResponse> {
   return fetchWithAuth<CreateAPIKeyResponse>(
     `${API_BASE_URL}/api/api-keys/${keyId}/type`,
@@ -1273,7 +1273,7 @@ export async function getRequestLogBody(logId: number): Promise<RequestBodyRespo
 
 // ==================== 聊天相关 API ====================
 
-export type ApiType = 'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image';
+export type ApiType = 'antigravity' | 'kiro' | 'qwen' | 'copilot' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image';
 
 export interface OpenAIModel {
   id: string;
@@ -2154,6 +2154,65 @@ export async function batchImportKiroEnterpriseAccounts(payload: {
   );
 }
 
+// ==================== Kiro External IdP 相关 API ====================
+
+/**
+ * 导入 Kiro External IdP 账户
+ */
+export async function importKiroExternalIdpAccount(payload: {
+  refreshToken: string;
+  clientId: string;
+  tokenEndpoint: string;
+  issuerUrl?: string;
+  scopes?: string;
+  accessToken?: string;
+  profileArn?: string;
+  region?: string;
+  accountName?: string;
+  isShared?: number;
+}): Promise<KiroAccount> {
+  const result = await fetchWithAuth<{ success: boolean; data: KiroAccount }>(
+    `${API_BASE_URL}/api/kiro/external-idp/import`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        refresh_token: payload.refreshToken,
+        client_id: payload.clientId,
+        token_endpoint: payload.tokenEndpoint,
+        issuer_url: payload.issuerUrl,
+        scopes: payload.scopes,
+        access_token: payload.accessToken,
+        profile_arn: payload.profileArn,
+        region: payload.region ?? 'us-east-1',
+        account_name: payload.accountName,
+        is_shared: payload.isShared ?? 0,
+      }),
+    }
+  );
+  return result.data;
+}
+
+/**
+ * 批量导入 Kiro External IdP 账户
+ */
+export async function batchImportKiroExternalIdpAccounts(payload: {
+  accounts: Array<Record<string, any>>;
+  region?: string;
+  isShared?: number;
+}): Promise<{ results: Array<{ index: number; success: boolean; data?: KiroAccount; error?: string }> }> {
+  return fetchWithAuth<{ results: Array<{ index: number; success: boolean; data?: KiroAccount; error?: string }> }>(
+    `${API_BASE_URL}/api/kiro/external-idp/batch-import`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        accounts: payload.accounts,
+        region: payload.region ?? 'us-east-1',
+        is_shared: payload.isShared ?? 0,
+      }),
+    }
+  );
+}
+
 // ==================== Qwen 账号管理相关 API ====================
 
 /**
@@ -2850,4 +2909,123 @@ export async function deleteGeminiCLIAccount(accountId: number): Promise<any> {
     { method: 'DELETE' }
   );
   return result.data;
+}
+
+
+// ─── GitHub Copilot ────────────────────────────────────────────
+
+export interface CopilotAccount {
+  id: number;
+  user_id: number;
+  account_name: string;
+  status: number;
+  is_shared: number;
+  github_login?: string;
+  copilot_plan?: string;
+  token_expires_at?: string;
+  last_refresh_at?: string;
+  consumed_input_tokens: number;
+  consumed_output_tokens: number;
+  consumed_total_tokens: number;
+  created_at: string;
+  updated_at: string;
+  last_used_at?: string;
+}
+
+export async function importCopilotAccount(payload: {
+  githubToken: string;
+  accountName?: string;
+  isShared?: number;
+}): Promise<CopilotAccount> {
+  const result = await fetchWithAuth<{ success: boolean; data: CopilotAccount }>(
+    `${API_BASE_URL}/api/copilot/accounts/import`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        github_token: payload.githubToken,
+        account_name: payload.accountName,
+        is_shared: payload.isShared ?? 0,
+      }),
+    }
+  );
+  return result.data;
+}
+
+export async function listCopilotAccounts(): Promise<CopilotAccount[]> {
+  const result = await fetchWithAuth<{ success: boolean; data: CopilotAccount[] }>(
+    `${API_BASE_URL}/api/copilot/accounts`
+  );
+  return result.data;
+}
+
+export async function updateCopilotAccountStatus(accountId: number, newStatus: number): Promise<any> {
+  const result = await fetchWithAuth<{ success: boolean; data: any }>(
+    `${API_BASE_URL}/api/copilot/accounts/${accountId}/status`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ status: newStatus }),
+    }
+  );
+  return result.data;
+}
+
+export async function updateCopilotAccountName(accountId: number, name: string): Promise<any> {
+  const result = await fetchWithAuth<{ success: boolean; data: any }>(
+    `${API_BASE_URL}/api/copilot/accounts/${accountId}/name`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ account_name: name }),
+    }
+  );
+  return result.data;
+}
+
+export async function deleteCopilotAccount(accountId: number): Promise<any> {
+  const result = await fetchWithAuth<{ success: boolean; data: any }>(
+    `${API_BASE_URL}/api/copilot/accounts/${accountId}`,
+    { method: 'DELETE' }
+  );
+  return result.data;
+}
+
+export async function refreshCopilotToken(accountId: number): Promise<any> {
+  const result = await fetchWithAuth<{ success: boolean; data: any }>(
+    `${API_BASE_URL}/api/copilot/accounts/${accountId}/refresh`,
+    { method: 'POST' }
+  );
+  return result.data;
+}
+
+export interface CopilotDeviceCodeResponse {
+  user_code: string;
+  verification_uri: string;
+  expires_in: number;
+  interval: number;
+}
+
+export async function startCopilotDeviceFlow(): Promise<CopilotDeviceCodeResponse> {
+  const result = await fetchWithAuth<{ success: boolean; data: CopilotDeviceCodeResponse }>(
+    `${API_BASE_URL}/api/copilot/oauth/device-code`,
+    { method: 'POST' }
+  );
+  return result.data;
+}
+
+export interface CopilotDevicePollResponse {
+  success: boolean;
+  status: 'pending' | 'success' | 'expired' | 'error';
+  message: string;
+  data?: CopilotAccount;
+  interval?: number;
+}
+
+export async function pollCopilotDeviceFlow(userCode: string): Promise<CopilotDevicePollResponse> {
+  const result = await fetchWithAuth<CopilotDevicePollResponse>(
+    `${API_BASE_URL}/api/copilot/oauth/device-poll`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ user_code: userCode }),
+    }
+  );
+  return result;
 }

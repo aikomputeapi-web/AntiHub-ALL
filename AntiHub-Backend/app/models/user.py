@@ -181,6 +181,12 @@ class User(Base):
         cascade="all, delete-orphan",
     )
 
+    copilot_accounts: Mapped[list["CopilotAccount"]] = relationship(
+        "CopilotAccount",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
     # 索引定义
     __table_args__ = (
         Index("ix_users_username", "username"),

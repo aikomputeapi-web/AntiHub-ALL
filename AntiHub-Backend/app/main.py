@@ -32,6 +32,7 @@ from app.api.routes import (
     kiro_router,
     kiro_aws_idc_router,
     kiro_enterprise_router,
+    kiro_external_idp_router,
     qwen_router,
     anthropic_router,
     anthropic_cc_router,
@@ -40,6 +41,7 @@ from app.api.routes import (
     gemini_cli_router,
     zai_tts_router,
     zai_image_router,
+    copilot_router,
 )
 
 # 配置日志
@@ -289,11 +291,13 @@ def create_app() -> FastAPI:
     app.include_router(kiro_router)  # Kiro账号管理API
     app.include_router(kiro_aws_idc_router)  # Kiro AWS IdC / Builder ID（独立入口）
     app.include_router(kiro_enterprise_router)  # Kiro 企业账户导入（Enterprise Account）
+    app.include_router(kiro_external_idp_router)  # Kiro External IdP 账户导入
     app.include_router(qwen_router)  # Qwen账号管理API
     app.include_router(codex_router)  # Codex账号管理API（本地落库）
     app.include_router(gemini_cli_router)  # GeminiCLI账号管理API（本地落库）
     app.include_router(zai_tts_router)  # ZAI TTS账号管理API
     app.include_router(zai_image_router)  # ZAI Image账号管理API
+    app.include_router(copilot_router)  # GitHub Copilot账号管理API
     app.include_router(v1_router)  # OpenAI兼容API，支持Antigravity和Kiro配置
     app.include_router(anthropic_router)  # Anthropic兼容API (/v1/messages)
     app.include_router(anthropic_cc_router)  # Claude Code兼容API (/cc/v1/messages)

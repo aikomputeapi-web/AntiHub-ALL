@@ -1,7 +1,10 @@
 services:
   web:
     # 国内请使用：swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/zhongruan0522/antihub-web:latest
-    image: ghcr.io/${IMAGE_OWNER:-zhongruan0522}/antihub-web:${IMAGE_TAG:-latest}
+    image: antihub-web:local
+    build:
+      context: ./AntiHub
+      dockerfile: Dockerfile
     container_name: antihub-web
     environment:
       NODE_ENV: production
@@ -19,7 +22,10 @@ services:
 
   backend:
     # 国内请使用：swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/zhongruan0522/antihub-backend:latest
-    image: ghcr.io/${IMAGE_OWNER:-zhongruan0522}/antihub-backend:${IMAGE_TAG:-latest}
+    image: antihub-backend:local
+    build:
+      context: ./AntiHub-Backend
+      dockerfile: Dockerfile
     container_name: antihub-backend
     command: ["sh", "-c", "alembic upgrade heads && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     environment:
@@ -29,8 +35,8 @@ services:
       USAGE_LOG_REDACT_HEADERS: ${USAGE_LOG_REDACT_HEADERS:-true}
 
       # 外部依赖（你自己提供/维护）
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_URL: ${REDIS_URL}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://antihub:please-change-me@antihub-postgres:5432/antihub}
+      REDIS_URL: ${REDIS_URL:-redis://antihub-redis:6379/0}
 
       # Codex（可选）
       CODEX_SUPPORTED_MODELS: ${CODEX_SUPPORTED_MODELS:-}
@@ -88,3 +94,8 @@ services:
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     restart: unless-stopped
+
+networks:
+  default:
+    external: true
+    name: antihub-all_default

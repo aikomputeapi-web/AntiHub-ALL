@@ -50,6 +50,7 @@ const CONFIG_TYPE_ORDER = [
   'antigravity',
   'kiro',
   'qwen',
+  'copilot',
   'zai-tts',
   'zai-image',
   'codex',
@@ -75,7 +76,7 @@ export default function SettingsPage() {
   const [editingKey, setEditingKey] = useState<PluginAPIKey | null>(null);
   const [editingConfigType, setEditingConfigType] = useState<PluginAPIKey['config_type']>('antigravity');
   const [isUpdatingKeyType, setIsUpdatingKeyType] = useState(false);
-  const [selectedConfigType, setSelectedConfigType] = useState<'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image'>('antigravity');
+  const [selectedConfigType, setSelectedConfigType] = useState<'antigravity' | 'kiro' | 'qwen' | 'copilot' | 'codex' | 'gemini-cli' | 'zai-tts' | 'zai-image'>('antigravity');
   const [configTypePage, setConfigTypePage] = useState(0);
   const [keyName, setKeyName] = useState('');
   const [currentUser, setCurrentUser] = useState<UserResponse | null>(null);
@@ -720,6 +721,8 @@ export default function SettingsPage() {
                               <Badge>Kiro</Badge>
                             ) : key.config_type === 'qwen' ? (
                               <Badge variant="outline">Qwen</Badge>
+                            ) : key.config_type === 'copilot' ? (
+                              <Badge variant="outline">Copilot</Badge>
                             ) : key.config_type === 'codex' ? (
                               <Badge variant="outline">Codex</Badge>
                             ) : key.config_type === 'gemini-cli' ? (
@@ -1305,6 +1308,34 @@ export default function SettingsPage() {
                 </div>
               </label>
 
+              {/* Copilot */}
+              <label
+                hidden={!visibleConfigTypes.includes('copilot')}
+                className={cn(
+                  "flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors",
+                  selectedConfigType === 'copilot'
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/50"
+                )}
+              >
+                <input
+                  type="radio"
+                  name="config_type"
+                  value="copilot"
+                  checked={selectedConfigType === 'copilot'}
+                  onChange={() => setSelectedConfigType('copilot')}
+                  className="w-4 h-4 mt-1"
+                />
+                <div className="flex-1">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold">Copilot</h3>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    使用 GitHub Copilot 账号配额
+                  </p>
+                </div>
+              </label>
+
               {/* ZAI TTS */}
               <label
                 hidden={!visibleConfigTypes.includes('zai-tts')}
@@ -1475,6 +1506,7 @@ export default function SettingsPage() {
                   <SelectItem value="antigravity">Antigravity</SelectItem>
                   <SelectItem value="kiro">Kiro</SelectItem>
                   <SelectItem value="qwen">Qwen</SelectItem>
+                  <SelectItem value="copilot">Copilot</SelectItem>
                   <SelectItem value="codex">Codex</SelectItem>
                   <SelectItem value="gemini-cli">GeminiCLI</SelectItem>
                   <SelectItem value="zai-tts">ZAI TTS</SelectItem>

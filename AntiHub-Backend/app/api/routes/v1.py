@@ -23,6 +23,7 @@ from app.models.user import User
 from app.services.plugin_api_service import PluginAPIService
 from app.services.kiro_service import KiroService, UpstreamAPIError
 from app.services.codex_service import CodexService
+from app.services.copilot_service import CopilotService
 from app.services.gemini_cli_api_service import GeminiCLIAPIService, GeminiCLIModelCooldownError
 from app.services.qwen_api_service import QwenAPIService
 from app.services.zai_tts_service import ZaiTTSService
@@ -264,6 +265,13 @@ def get_codex_service(
     return CodexService(db, redis)
 
 
+def get_copilot_service(
+    db: AsyncSession = Depends(get_db_session),
+    redis: RedisClient = Depends(get_redis),
+) -> CopilotService:
+    return CopilotService(db, redis)
+
+
 def get_gemini_cli_api_service(
     db: AsyncSession = Depends(get_db_session),
     redis: RedisClient = Depends(get_redis),
@@ -314,7 +322,7 @@ async def list_models(
         # 如果是JWT token认证（无_config_type），检查请求头
         if config_type is None:
             api_type = request.headers.get("X-Api-Type")
-            if api_type in ["kiro", "antigravity", "qwen", "codex", "gemini-cli", "zai-image", "zai-tts"]:
+            if api_type in ["kiro", "antigravity", "qwen", "codex", "copilot", "gemini-cli", "zai-image", "zai-tts"]:
                 config_type = api_type
         
         use_kiro = config_type == "kiro"
@@ -687,7 +695,7 @@ async def responses(
     config_type = getattr(current_user, "_config_type", None)
     if config_type is None:
         api_type = raw_request.headers.get("X-Api-Type")
-        if api_type in ["kiro", "antigravity", "qwen", "codex"]:
+        if api_type in ["kiro", "antigravity", "qwen", "codex", "copilot"]:
             config_type = api_type
 
     effective_config_type = config_type or "antigravity"
@@ -969,7 +977,7 @@ async def responses_compact(
     config_type = getattr(current_user, "_config_type", None)
     if config_type is None:
         api_type = raw_request.headers.get("X-Api-Type")
-        if api_type in ["kiro", "antigravity", "qwen", "codex"]:
+        if api_type in ["kiro", "antigravity", "qwen", "codex", "copilot"]:
             config_type = api_type
 
     effective_config_type = config_type or "antigravity"
@@ -1206,6 +1214,7 @@ async def chat_completions(
     qwen_service: QwenAPIService = Depends(get_qwen_api_service),
     kiro_service: KiroService = Depends(get_kiro_service),
     codex_service: CodexService = Depends(get_codex_service),
+    copilot_service: CopilotService = Depends(get_copilot_service),
     gemini_cli_service: GeminiCLIAPIService = Depends(get_gemini_cli_api_service),
     zai_image_service: ZaiImageService = Depends(get_zai_image_service),
 ):
@@ -1232,12 +1241,13 @@ async def chat_completions(
     config_type = getattr(current_user, "_config_type", None)
     if config_type is None:
         api_type = raw_request.headers.get("X-Api-Type")
-        if api_type in ["kiro", "antigravity", "qwen", "codex", "gemini-cli", "zai-image", "zai-tts"]:
+        if api_type in ["kiro", "antigravity", "qwen", "codex", "copilot", "gemini-cli", "zai-image", "zai-tts"]:
             config_type = api_type
 
     effective_config_type = config_type or "antigravity"
     use_kiro = effective_config_type == "kiro"
     use_codex = effective_config_type == "codex"
+    use_copilot = effective_config_type == "copilot"
     use_gemini_cli = effective_config_type == "gemini-cli"
     use_qwen = effective_config_type == "qwen"
 
@@ -1639,6 +1649,16 @@ async def chat_completions(
                             else:
                                 tracker.feed(str(chunk).encode("utf-8", errors="replace"))
                             yield chunk
+                    elif use_copilot:
+                        async for chunk in copilot_service.chat_completions_stream(
+                            user_id=current_user.id,
+                            request_data=request_json,
+                        ):
+                            if isinstance(chunk, (bytes, bytearray)):
+                                tracker.feed(bytes(chunk))
+                            else:
+                                tracker.feed(str(chunk).encode("utf-8", errors="replace"))
+                            yield chunk
                     elif use_qwen:
                         async for chunk in qwen_service.openai_chat_completions_stream(
                             user_id=current_user.id,
@@ -1716,6 +1736,11 @@ async def chat_completions(
 
         if use_kiro:
             openai_stream = kiro_service.chat_completions_stream(
+                user_id=current_user.id,
+                request_data=request_json,
+            )
+        elif use_copilot:
+            openai_stream = copilot_service.chat_completions_stream(
                 user_id=current_user.id,
                 request_data=request_json,
             )

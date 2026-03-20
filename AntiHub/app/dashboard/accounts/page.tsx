@@ -48,6 +48,11 @@ import {
   updateZaiImageAccountName,
   updateZaiImageAccountCredentials,
   deleteZaiImageAccount,
+  listCopilotAccounts,
+  updateCopilotAccountStatus,
+  updateCopilotAccountName,
+  deleteCopilotAccount,
+  refreshCopilotToken,
   type CodexWhamUsageData,
   type Account,
   type AccountProjects,
@@ -59,6 +64,7 @@ import {
   type GeminiCLIQuotaData,
   type ZaiTTSAccount,
   type ZaiImageAccount,
+  type CopilotAccount,
 } from '@/lib/api';
 import { AddAccountDrawer } from '@/components/add-account-drawer';
 import { Button } from '@/components/ui/button';
@@ -99,7 +105,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip } from '@/components/ui/tooltip-card';
-import { IconCirclePlusFilled, IconDotsVertical, IconRefresh, IconTrash, IconToggleLeft, IconToggleRight, IconExternalLink, IconChartBar, IconEdit, IconAlertTriangle, IconCopy, IconInfoCircle } from '@tabler/icons-react';
+import { IconCirclePlusFilled, IconDotsVertical, IconRefresh, IconTrash, IconToggleLeft, IconToggleRight, IconExternalLink, IconChartBar, IconEdit, IconAlertTriangle, IconCopy, IconInfoCircle, IconBrandGithub } from '@tabler/icons-react';
 import {
   Select,
   SelectContent,
@@ -118,6 +124,7 @@ const ACCOUNT_CHANNELS = [
   'zai-image',
   'codex',
   'gemini',
+  'copilot',
 ] as const;
 
 type AccountsChannel = (typeof ACCOUNT_CHANNELS)[number];
@@ -131,6 +138,7 @@ function createChannelState<T>(value: T): Record<AccountsChannel, T> {
     'zai-image': value,
     codex: value,
     gemini: value,
+    copilot: value,
   };
 }
 
@@ -157,6 +165,7 @@ export default function AccountsPage() {
   const [geminiCliAccounts, setGeminiCliAccounts] = useState<GeminiCLIAccount[]>([]);
   const [zaiTtsAccounts, setZaiTtsAccounts] = useState<ZaiTTSAccount[]>([]);
   const [zaiImageAccounts, setZaiImageAccounts] = useState<ZaiImageAccount[]>([]);
+  const [copilotAccounts, setCopilotAccounts] = useState<CopilotAccount[]>([]);
 
   const [isPageLoading, setIsPageLoading] = useState(true);
   const [isBootstrapped, setIsBootstrapped] = useState(false);
@@ -544,6 +553,9 @@ export default function AccountsPage() {
       } else if (channel === 'zai-image') {
         const zaiImageData = await getZaiImageAccounts();
         setZaiImageAccounts(zaiImageData);
+      } else if (channel === 'copilot') {
+        const copilotData = await listCopilotAccounts();
+        setCopilotAccounts(copilotData);
       }
 
       setChannelLoadedFlag(channel, true);
@@ -561,6 +573,7 @@ export default function AccountsPage() {
         if (channel === 'gemini') setGeminiCliAccounts([]);
         if (channel === 'zai-tts') setZaiTtsAccounts([]);
         if (channel === 'zai-image') setZaiImageAccounts([]);
+        if (channel === 'copilot') setCopilotAccounts([]);
       }
 
       if (mode === 'foreground') {
@@ -2040,6 +2053,11 @@ export default function AccountsPage() {
                         <Gemini className="size-4" />
                         GeminiCLI
                       </span>
+                    ) : activeTab === 'copilot' ? (
+                      <span className="flex items-center gap-2">
+                        <IconBrandGithub className="size-4" />
+                        Copilot
+                      </span>
                     ) : (
                       <span className="flex items-center gap-2">
                         <OpenAI className="size-4" />
@@ -2089,6 +2107,12 @@ export default function AccountsPage() {
                     <span className="flex items-center gap-2">
                       <Gemini className="size-4" />
                       GeminiCLI
+                    </span>
+                  </SelectItem>
+                  <SelectItem value="copilot">
+                    <span className="flex items-center gap-2">
+                      <IconBrandGithub className="size-4" />
+                      Copilot
                     </span>
                   </SelectItem>
                 </SelectContent>
@@ -3020,6 +3044,149 @@ export default function AccountsPage() {
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                   onClick={() => handleDeleteZaiImageAccount(account.account_id)}
+                                  className="text-red-600"
+                                >
+                                  <IconTrash className="size-4 mr-2" />
+                                  删除
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {activeTab === 'copilot' && (
+          <Card className="flex min-h-0 flex-1 flex-col">
+            <CardHeader className="text-left">
+              <CardTitle className="text-left">GitHub Copilot 账号</CardTitle>
+              <CardDescription className="text-left">
+                共 {copilotAccounts.length} 个账号，通过 GitHub OAuth 授权导入
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex min-h-0 flex-1 flex-col">
+              {isChannelLoading.copilot ? (
+                <div className="flex items-center justify-center py-12">
+                  <MorphingSquare message="加载账号列表..." />
+                </div>
+              ) : copilotAccounts.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <p className="text-lg mb-2">暂无 GitHub Copilot 账号</p>
+                  <p className="text-sm">点击右上角「添加账号」通过 GitHub 授权导入</p>
+                </div>
+              ) : (
+                <div className="flex-1 min-h-0 overflow-auto -mx-6 px-6 md:mx-0 md:px-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="min-w-[100px]">ID</TableHead>
+                        <TableHead className="min-w-[160px]">名称</TableHead>
+                        <TableHead className="min-w-[120px]">GitHub 用户</TableHead>
+                        <TableHead className="min-w-[80px]">状态</TableHead>
+                        <TableHead className="min-w-[180px]">Token 过期</TableHead>
+                        <TableHead className="min-w-[120px]">累计 Tokens</TableHead>
+                        <TableHead className="text-right min-w-[80px]">操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {copilotAccounts.map((account) => (
+                        <TableRow key={account.id}>
+                          <TableCell className="font-mono text-sm">{account.id}</TableCell>
+                          <TableCell>{account.account_name || '未命名'}</TableCell>
+                          <TableCell className="font-mono text-sm">{account.github_login || '-'}</TableCell>
+                          <TableCell>
+                            <Badge variant={account.status === 1 ? 'default' : 'secondary'}>
+                              {account.status === 1 ? '启用' : '禁用'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                            {account.token_expires_at
+                              ? new Date(account.token_expires_at).toLocaleString('zh-CN')
+                              : '-'}
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {(account.consumed_total_tokens || 0).toLocaleString('zh-CN')}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon">
+                                  <IconDotsVertical className="size-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={async () => {
+                                    const newName = prompt('请输入新名称', account.account_name);
+                                    if (newName !== null && newName.trim()) {
+                                      try {
+                                        await updateCopilotAccountName(account.id, newName.trim());
+                                        loadChannel('copilot');
+                                        toasterRef.current?.show({ title: '名称已更新', message: '账号名称已成功更新', variant: 'success', position: 'top-right' });
+                                      } catch (e: any) {
+                                        toasterRef.current?.show({ title: '重命名失败', message: e?.message, variant: 'error', position: 'top-right' });
+                                      }
+                                    }
+                                  }}
+                                >
+                                  <IconEdit className="size-4 mr-2" />
+                                  重命名
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={async () => {
+                                    try {
+                                      await updateCopilotAccountStatus(account.id, account.status === 1 ? 0 : 1);
+                                      loadChannel('copilot');
+                                      toasterRef.current?.show({ title: '状态已更新', message: '账号状态已切换', variant: 'success', position: 'top-right' });
+                                    } catch (e: any) {
+                                      toasterRef.current?.show({ title: '状态更新失败', message: e?.message, variant: 'error', position: 'top-right' });
+                                    }
+                                  }}
+                                >
+                                  {account.status === 1 ? (
+                                    <>
+                                      <IconToggleLeft className="size-4 mr-2" />
+                                      禁用
+                                    </>
+                                  ) : (
+                                    <>
+                                      <IconToggleRight className="size-4 mr-2" />
+                                      启用
+                                    </>
+                                  )}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={async () => {
+                                    try {
+                                      await refreshCopilotToken(account.id);
+                                      loadChannel('copilot');
+                                      toasterRef.current?.show({ title: 'Token 已刷新', message: 'Copilot Token 已成功刷新', variant: 'success', position: 'top-right' });
+                                    } catch (e: any) {
+                                      toasterRef.current?.show({ title: '刷新失败', message: e?.message, variant: 'error', position: 'top-right' });
+                                    }
+                                  }}
+                                >
+                                  <IconRefresh className="size-4 mr-2" />
+                                  刷新 Token
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={async () => {
+                                    if (confirm('确定要删除此 Copilot 账号？')) {
+                                      try {
+                                        await deleteCopilotAccount(account.id);
+                                        loadChannel('copilot');
+                                        toasterRef.current?.show({ title: '账号已删除', message: 'Copilot 账号已成功删除', variant: 'success', position: 'top-right' });
+                                      } catch (e: any) {
+                                        toasterRef.current?.show({ title: '删除失败', message: e?.message, variant: 'error', position: 'top-right' });
+                                      }
+                                    }
+                                  }}
                                   className="text-red-600"
                                 >
                                   <IconTrash className="size-4 mr-2" />

@@ -20,11 +20,15 @@ import {
   importKiroAwsIdcAccount,
   importKiroEnterpriseAccount,
   batchImportKiroEnterpriseAccounts,
+  importKiroExternalIdpAccount,
+  batchImportKiroExternalIdpAccounts,
   getGeminiCLIOAuthAuthorizeUrl,
   submitGeminiCLIOAuthCallback,
   importGeminiCLIAccount,
   createZaiTTSAccount,
   createZaiImageAccount,
+  startCopilotDeviceFlow,
+  pollCopilotDeviceFlow,
 } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Button as StatefulButton } from '@/components/ui/stateful-button';
@@ -38,7 +42,7 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer';
-import { IconExternalLink, IconCopy, IconX } from '@tabler/icons-react';
+import { IconExternalLink, IconCopy, IconX, IconBrandGithub } from '@tabler/icons-react';
 import { Gemini, OpenAI, Qwen } from '@lobehub/icons';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -109,8 +113,8 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
   const [step, setStep] = useState<
     'platform' | 'kiro_provider' | 'method' | 'authorize'
   >('platform');
-  const [platform, setPlatform] = useState<'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini' | 'zai-tts' | 'zai-image' | ''>('');
-  const [kiroProvider, setKiroProvider] = useState<'social' | 'aws_idc' | 'enterprise' | ''>('');
+  const [platform, setPlatform] = useState<'antigravity' | 'kiro' | 'qwen' | 'codex' | 'gemini' | 'zai-tts' | 'zai-image' | 'copilot' | ''>('');
+  const [kiroProvider, setKiroProvider] = useState<'social' | 'aws_idc' | 'enterprise' | 'external_idp' | ''>('');
   const [loginMethod, setLoginMethod] = useState<'manual' | 'refresh_token' | ''>(''); // Antigravity 登录方式
   const [kiroLoginMethod, setKiroLoginMethod] = useState<'oauth' | 'refresh_token' | ''>('');
   const [kiroAwsIdcMethod, setKiroAwsIdcMethod] = useState<
@@ -124,6 +128,18 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
   const [kiroEnterpriseJsonText, setKiroEnterpriseJsonText] = useState('');
   const [kiroEnterpriseJsonResults, setKiroEnterpriseJsonResults] = useState<EnterpriseJsonImportResult[]>([]);
   const [isKiroEnterpriseJsonImporting, setIsKiroEnterpriseJsonImporting] = useState(false);
+  const kiroExternalIdpJsonCancelRef = useRef(false);
+  const [kiroExternalIdpMethod, setKiroExternalIdpMethod] = useState<'manual_import' | 'json_import' | ''>('');
+  const [kiroExternalIdpRefreshToken, setKiroExternalIdpRefreshToken] = useState('');
+  const [kiroExternalIdpClientId, setKiroExternalIdpClientId] = useState('');
+  const [kiroExternalIdpTokenEndpoint, setKiroExternalIdpTokenEndpoint] = useState('');
+  const [kiroExternalIdpIssuerUrl, setKiroExternalIdpIssuerUrl] = useState('');
+  const [kiroExternalIdpScopes, setKiroExternalIdpScopes] = useState('');
+  const [kiroExternalIdpProfileArn, setKiroExternalIdpProfileArn] = useState('');
+  const [kiroExternalIdpRegion, setKiroExternalIdpRegion] = useState('us-east-1');
+  const [kiroExternalIdpJsonText, setKiroExternalIdpJsonText] = useState('');
+  const [kiroExternalIdpJsonResults, setKiroExternalIdpJsonResults] = useState<EnterpriseJsonImportResult[]>([]);
+  const [isKiroExternalIdpJsonImporting, setIsKiroExternalIdpJsonImporting] = useState(false);
   const [kiroAwsIdcRegion, setKiroAwsIdcRegion] = useState('us-east-1');
   const [qwenLoginMethod, setQwenLoginMethod] = useState<'oauth' | 'json'>('oauth');
   const [codexLoginMethod, setCodexLoginMethod] = useState<'oauth' | 'json'>('oauth');
@@ -158,6 +174,11 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
   const [zaiTtsVoiceId, setZaiTtsVoiceId] = useState('system_001');
   const [zaiImageAccountName, setZaiImageAccountName] = useState('');
   const [zaiImageToken, setZaiImageToken] = useState('');
+  const [copilotDeviceCode, setCopilotDeviceCode] = useState('');
+  const [copilotVerificationUri, setCopilotVerificationUri] = useState('');
+  const [copilotIsPolling, setCopilotIsPolling] = useState(false);
+  const [copilotIsStarting, setCopilotIsStarting] = useState(false);
+  const copilotPollTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [oauthUrl, setOauthUrl] = useState('');
   const [oauthState, setOauthState] = useState(''); // Kiro OAuth state
   const [callbackUrl, setCallbackUrl] = useState('');
@@ -203,6 +224,10 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
       }
       if (pollTimerRef.current) {
         clearInterval(pollTimerRef.current);
+      }
+      if (copilotPollTimerRef.current) {
+        clearTimeout(copilotPollTimerRef.current);
+        copilotPollTimerRef.current = null;
       }
     };
   }, []);
@@ -253,7 +278,7 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
         });
         return;
       }
-      if (platform === 'zai-tts' || platform === 'zai-image') {
+      if (platform === 'zai-tts' || platform === 'zai-image' || platform === 'copilot') {
         setStep('authorize');
         return;
       }
@@ -323,6 +348,21 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
         return;
       }
 
+      if (kiroProvider === 'external_idp') {
+        setKiroExternalIdpMethod('manual_import');
+        setKiroExternalIdpRefreshToken('');
+        setKiroExternalIdpClientId('');
+        setKiroExternalIdpTokenEndpoint('');
+        setKiroExternalIdpIssuerUrl('');
+        setKiroExternalIdpScopes('');
+        setKiroExternalIdpRegion('us-east-1');
+        setKiroExternalIdpJsonText('');
+        setKiroExternalIdpJsonResults([]);
+        setIsKiroExternalIdpJsonImporting(false);
+        setStep('method');
+        return;
+      }
+
       setStep('method');
     } else if (step === 'method') {
       if (platform === 'kiro') {
@@ -347,6 +387,16 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
         }
 
         if (kiroProvider === 'enterprise' && !kiroEnterpriseMethod) {
+          toasterRef.current?.show({
+            title: '选择方式',
+            message: '请选择导入方式',
+            variant: 'warning',
+            position: 'top-right',
+          });
+          return;
+        }
+
+        if (kiroProvider === 'external_idp' && !kiroExternalIdpMethod) {
           toasterRef.current?.show({
             title: '选择方式',
             message: '请选择导入方式',
@@ -461,12 +511,14 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
       setKiroLoginMethod('');
       setKiroAwsIdcMethod('');
       setKiroEnterpriseMethod('');
+      setKiroExternalIdpMethod('');
     } else if (step === 'method') {
       if (platform === 'kiro') {
         setStep('kiro_provider');
         setKiroLoginMethod('');
         setKiroAwsIdcMethod('');
         setKiroEnterpriseMethod('');
+        setKiroExternalIdpMethod('');
       } else {
         setStep('platform');
         if (platform === 'antigravity') {
@@ -493,15 +545,21 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
         setCountdown(600);
       }
 
+      if (platform === 'copilot') {
+        resetCopilotState();
+      }
+
       kiroAwsIdcJsonCancelRef.current = true;
       setIsKiroAwsIdcJsonImporting(false);
       kiroEnterpriseJsonCancelRef.current = true;
       setIsKiroEnterpriseJsonImporting(false);
+      kiroExternalIdpJsonCancelRef.current = true;
+      setIsKiroExternalIdpJsonImporting(false);
 
       if (platform === 'qwen') {
         setStep('method');
         setQwenLoginMethod('oauth');
-      } else if (platform === 'zai-tts' || platform === 'zai-image') {
+      } else if (platform === 'zai-tts' || platform === 'zai-image' || platform === 'copilot') {
         setStep('platform');
       } else if (platform === 'codex') {
         setStep('method');
@@ -1379,6 +1437,200 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
     });
   };
 
+  // ==================== External IdP 手动导入 ====================
+  const handleImportKiroExternalIdpAccount = async () => {
+    const refreshToken = kiroExternalIdpRefreshToken.trim();
+    const clientId = kiroExternalIdpClientId.trim();
+    const tokenEndpoint = kiroExternalIdpTokenEndpoint.trim();
+    const region = kiroExternalIdpRegion.trim();
+
+    if (!refreshToken || !clientId || !tokenEndpoint) {
+      toasterRef.current?.show({
+        title: '输入错误',
+        message: '请填写 refresh_token、client_id 和 token_endpoint',
+        variant: 'warning',
+        position: 'top-right',
+      });
+      return;
+    }
+
+    try {
+      const created = await importKiroExternalIdpAccount({
+        refreshToken,
+        clientId,
+        tokenEndpoint,
+        issuerUrl: kiroExternalIdpIssuerUrl.trim() || undefined,
+        scopes: kiroExternalIdpScopes.trim() || undefined,
+        profileArn: kiroExternalIdpProfileArn.trim() || undefined,
+        region: region || 'us-east-1',
+        isShared: 0,
+      });
+
+      if (created?.account_id) {
+        await tryWarmupKiroAccountInfo(created.account_id);
+      }
+
+      toasterRef.current?.show({
+        title: '导入成功',
+        message: 'External IdP 账户已成功添加',
+        variant: 'success',
+        position: 'top-right',
+      });
+
+      window.dispatchEvent(new CustomEvent('accountAdded'));
+      onOpenChange(false);
+      resetState();
+      onSuccess?.();
+    } catch (err) {
+      toasterRef.current?.show({
+        title: '导入失败',
+        message: err instanceof Error ? err.message : '导入 External IdP 账户失败',
+        variant: 'error',
+        position: 'top-right',
+      });
+      throw err;
+    }
+  };
+
+  // ==================== External IdP JSON 导入 ====================
+  const handleImportKiroExternalIdpJson = async () => {
+    const raw = kiroExternalIdpJsonText.replace(/^\uFEFF/, '').trim();
+    if (!raw) {
+      toasterRef.current?.show({
+        title: '输入错误',
+        message: '请粘贴 JSON 内容',
+        variant: 'warning',
+        position: 'top-right',
+      });
+      return;
+    }
+
+    if (isKiroExternalIdpJsonImporting) return;
+
+    kiroExternalIdpJsonCancelRef.current = false;
+
+    let parsed: unknown;
+    const normalized = raw.replace(/，/g, ',');
+    try {
+      parsed = JSON.parse(normalized);
+    } catch {
+      toasterRef.current?.show({
+        title: 'JSON 格式错误',
+        message: '请输入有效的 JSON 格式',
+        variant: 'error',
+        position: 'top-right',
+      });
+      return;
+    }
+
+    const items: Record<string, any>[] = Array.isArray(parsed) ? parsed : [parsed];
+    if (items.length === 0) {
+      toasterRef.current?.show({
+        title: '数据为空',
+        message: '未找到有效的凭据条目',
+        variant: 'warning',
+        position: 'top-right',
+      });
+      return;
+    }
+
+    setKiroExternalIdpJsonResults(
+      items.map((_, i) => ({
+        index: i,
+        status: 'pending' as EnterpriseJsonImportStatus,
+      }))
+    );
+
+    setIsKiroExternalIdpJsonImporting(true);
+
+    let successCount = 0;
+    let failedCount = 0;
+
+    const updateResult = (index: number, patch: Partial<EnterpriseJsonImportResult>) => {
+      setKiroExternalIdpJsonResults((prev) =>
+        prev.map((r) => (r.index === index ? { ...r, ...patch } : r))
+      );
+    };
+
+    for (let index = 0; index < items.length; index++) {
+      if (kiroExternalIdpJsonCancelRef.current) break;
+
+      const entry = items[index];
+      try {
+        const refreshToken =
+          entry.refresh_token || entry.refreshToken;
+        const clientId = entry.client_id || entry.clientId;
+        const tokenEndpoint = entry.token_endpoint || entry.tokenEndpoint;
+
+        if (!refreshToken || !clientId || !tokenEndpoint) {
+          throw new Error('缺少必填字段: refresh_token / client_id / token_endpoint');
+        }
+
+        const account = await importKiroExternalIdpAccount({
+          refreshToken,
+          clientId,
+          tokenEndpoint,
+          issuerUrl: entry.issuer_url || entry.issuerUrl || undefined,
+          scopes: entry.scopes || undefined,
+          region: entry.region || kiroExternalIdpRegion || 'us-east-1',
+          accountName: entry.account_name || entry.accountName || undefined,
+          isShared: 0,
+          profileArn: entry.profile_arn || entry.profileArn || undefined,
+        });
+
+        if (account?.account_id) {
+          try {
+            await getKiroAccountBalance(account.account_id, { refresh: true });
+          } catch {}
+        }
+
+        successCount++;
+        updateResult(index, {
+          status: 'success',
+          accountName: account.account_name || undefined,
+          message: '成功',
+        });
+      } catch (err) {
+        failedCount++;
+        updateResult(index, {
+          status: 'error',
+          message: err instanceof Error ? err.message : '导入失败',
+        });
+      }
+    }
+
+    setIsKiroExternalIdpJsonImporting(false);
+
+    if (kiroExternalIdpJsonCancelRef.current) return;
+
+    if (successCount > 0) {
+      window.dispatchEvent(new CustomEvent('accountAdded'));
+      onSuccess?.();
+    }
+
+    if (items.length === 1 && successCount === 1) {
+      toasterRef.current?.show({
+        title: '导入成功',
+        message: 'External IdP 账户已成功添加',
+        variant: 'success',
+        position: 'top-right',
+      });
+      onOpenChange(false);
+      resetState();
+      return;
+    }
+
+    const variant =
+      successCount === 0 ? 'error' : failedCount > 0 ? 'warning' : 'success';
+
+    toasterRef.current?.show({
+      title: 'JSON 导入完成',
+      message: `成功 ${successCount}，失败 ${failedCount}`,
+      variant,
+      position: 'top-right',
+    });
+  };
+
   const handleImportKiroAwsIdcJson = async () => {
     const raw = kiroAwsIdcJsonText.replace(/^\uFEFF/, '').trim();
     if (!raw) {
@@ -2213,6 +2465,95 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
     }
   };
 
+  // ==================== GitHub Copilot Device Flow ====================
+  const stopCopilotPolling = () => {
+    if (copilotPollTimerRef.current) {
+      clearTimeout(copilotPollTimerRef.current);
+      copilotPollTimerRef.current = null;
+    }
+    setCopilotIsPolling(false);
+  };
+
+  const resetCopilotState = () => {
+    stopCopilotPolling();
+    setCopilotDeviceCode('');
+    setCopilotVerificationUri('');
+    setCopilotIsStarting(false);
+  };
+
+  const handlePollCopilotDeviceFlow = async (userCode: string, intervalMs: number) => {
+    try {
+      const result = await pollCopilotDeviceFlow(userCode);
+      if (result.status === 'pending') {
+        // Respect slow_down interval from server
+        const nextInterval = result.interval ? result.interval * 1000 : intervalMs;
+        copilotPollTimerRef.current = setTimeout(() => {
+          handlePollCopilotDeviceFlow(userCode, nextInterval);
+        }, nextInterval);
+        return;
+      }
+
+      if (result.status === 'success') {
+        stopCopilotPolling();
+        (toasterRef.current?.show ?? showToast)({
+          title: '授权成功',
+          message: 'GitHub Copilot 账号已添加',
+          variant: 'success',
+          position: 'top-right',
+        });
+        window.dispatchEvent(new CustomEvent('accountAdded'));
+        onOpenChange(false);
+        resetState();
+        onSuccess?.();
+      } else {
+        stopCopilotPolling();
+        (toasterRef.current?.show ?? showToast)({
+          title: '授权失败',
+          message: result.message || (result.status === 'expired' ? '验证码已过期，请重新开始' : '授权过程中发生错误'),
+          variant: 'error',
+          position: 'top-right',
+        });
+        resetCopilotState();
+      }
+    } catch {
+      // Network error — retry after interval
+      copilotPollTimerRef.current = setTimeout(() => {
+        handlePollCopilotDeviceFlow(userCode, intervalMs);
+      }, intervalMs);
+    }
+  };
+
+  const handleStartCopilotDeviceFlow = async () => {
+    setCopilotIsStarting(true);
+    try {
+      const data = await startCopilotDeviceFlow();
+      setCopilotDeviceCode(data.user_code);
+      setCopilotVerificationUri(data.verification_uri);
+
+      window.open(data.verification_uri, '_blank');
+
+      const interval = Math.max((data.interval || 5) + 1, 6) * 1000;
+      const code = data.user_code;
+      setCopilotIsPolling(true);
+      setCopilotIsStarting(false);
+
+      if (copilotPollTimerRef.current) {
+        clearTimeout(copilotPollTimerRef.current);
+      }
+      copilotPollTimerRef.current = setTimeout(() => {
+        handlePollCopilotDeviceFlow(code, interval);
+      }, interval);
+    } catch (err) {
+      (toasterRef.current?.show ?? showToast)({
+        title: '启动失败',
+        message: err instanceof Error ? err.message : '无法启动 GitHub 授权流程',
+        variant: 'error',
+        position: 'top-right',
+      });
+      setCopilotIsStarting(false);
+    }
+  };
+
   const resetState = () => {
     // 清除所有定时器
     if (timerRef.current) {
@@ -2227,6 +2568,7 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
     kiroBatchCancelRef.current = true;
     kiroAwsIdcJsonCancelRef.current = true;
     kiroEnterpriseJsonCancelRef.current = true;
+    kiroExternalIdpJsonCancelRef.current = true;
 
     setStep('platform');
     setPlatform('');
@@ -2242,6 +2584,17 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
     setKiroEnterpriseJsonText('');
     setKiroEnterpriseJsonResults([]);
     setIsKiroEnterpriseJsonImporting(false);
+    setKiroExternalIdpMethod('');
+    setKiroExternalIdpRefreshToken('');
+    setKiroExternalIdpClientId('');
+    setKiroExternalIdpTokenEndpoint('');
+    setKiroExternalIdpIssuerUrl('');
+    setKiroExternalIdpScopes('');
+    setKiroExternalIdpProfileArn('');
+    setKiroExternalIdpRegion('us-east-1');
+    setKiroExternalIdpJsonText('');
+    setKiroExternalIdpJsonResults([]);
+    setIsKiroExternalIdpJsonImporting(false);
     setQwenLoginMethod('oauth');
     setCodexLoginMethod('oauth');
     setKiroImportRefreshToken('');
@@ -2272,6 +2625,14 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
     setZaiImageAccountName('');
     setZaiImageToken('');
     setGeminiCliCredentialJson('');
+    setCopilotDeviceCode('');
+    setCopilotVerificationUri('');
+    setCopilotIsPolling(false);
+    setCopilotIsStarting(false);
+    if (copilotPollTimerRef.current) {
+      clearInterval(copilotPollTimerRef.current);
+      copilotPollTimerRef.current = null;
+    }
     setKiroAwsIdcRegion('us-east-1');
     setOauthUrl('');
     setOauthState('');
@@ -2304,6 +2665,7 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
     kiroBatchCancelRef.current = true;
     kiroAwsIdcJsonCancelRef.current = true;
     kiroEnterpriseJsonCancelRef.current = true;
+    kiroExternalIdpJsonCancelRef.current = true;
 
     onOpenChange(false);
     // 延迟重置状态，等待动画完成
@@ -2327,6 +2689,7 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
           kiroBatchCancelRef.current = true;
           kiroAwsIdcJsonCancelRef.current = true;
           kiroEnterpriseJsonCancelRef.current = true;
+          kiroExternalIdpJsonCancelRef.current = true;
           // 延迟重置状态
           setTimeout(resetState, 300);
         }
@@ -2559,6 +2922,34 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
                     </p>
                   </div>
                 </label>
+
+                <label
+                  className={cn(
+                    "flex items-center gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors",
+                    platform === 'copilot' ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="platform"
+                    value="copilot"
+                    checked={platform === 'copilot'}
+                    onChange={(e) => setPlatform(e.target.value as 'copilot')}
+                    className="w-4 h-4"
+                  />
+                  <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
+                    <IconBrandGithub className="size-6 text-foreground" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold">GitHub Copilot</h3>
+                      <Badge variant="secondary">可用</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      GitHub Token 导入
+                    </p>
+                  </div>
+                </label>
               </div>
             </div>
           )}
@@ -2654,11 +3045,40 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
                     </p>
                   </div>
                 </label>
+
+                <label
+                  className={cn(
+                    "flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors",
+                    kiroProvider === 'external_idp'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-primary/50'
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="kiroProvider"
+                    value="external_idp"
+                    checked={kiroProvider === 'external_idp'}
+                    onChange={() => {
+                      setKiroProvider('external_idp');
+                      setKiroLoginMethod('');
+                      setKiroAwsIdcMethod('');
+                      setKiroEnterpriseMethod('');
+                    }}
+                    className="w-4 h-4 mt-1"
+                  />
+                  <div className="flex-1">
+                    <h3 className="font-semibold">External IdP（外部身份提供商）</h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      通过外部 OIDC 身份提供商（如 Microsoft Entra ID）认证的账户
+                    </p>
+                  </div>
+                </label>
               </div>
             </div>
           )}
 
-          {/* 选择添加方式 (Qwen) */}
+          {/* 选择添加方式 (Codex) */}
           {step === 'method' && platform === 'codex' && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">选择添加方式</p>
@@ -2998,6 +3418,65 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
             </div>
           )}
 
+          {/* 选择导入方式 (Kiro External IdP) */}
+          {step === 'method' && platform === 'kiro' && kiroProvider === 'external_idp' && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                选择导入方式
+              </p>
+
+              <div className="space-y-3">
+                <label
+                  className={cn(
+                    "flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors",
+                    kiroExternalIdpMethod === 'manual_import'
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:border-primary/50"
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="kiroExternalIdpMethod"
+                    value="manual_import"
+                    checked={kiroExternalIdpMethod === 'manual_import'}
+                    onChange={() => setKiroExternalIdpMethod('manual_import')}
+                    className="w-4 h-4 mt-1"
+                  />
+                  <div className="flex-1">
+                    <h3 className="font-semibold">手动填写</h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      填写 refreshToken + clientId + tokenEndpoint 导入单个 External IdP 账户
+                    </p>
+                  </div>
+                </label>
+
+                <label
+                  className={cn(
+                    "flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors",
+                    kiroExternalIdpMethod === 'json_import'
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:border-primary/50"
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="kiroExternalIdpMethod"
+                    value="json_import"
+                    checked={kiroExternalIdpMethod === 'json_import'}
+                    onChange={() => setKiroExternalIdpMethod('json_import')}
+                    className="w-4 h-4 mt-1"
+                  />
+                  <div className="flex-1">
+                    <h3 className="font-semibold">JSON 导入</h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      粘贴 JSON 文本，支持单个对象或数组批量导入
+                    </p>
+                  </div>
+                </label>
+              </div>
+            </div>
+          )}
+
           {step === 'method' && platform === 'antigravity' && (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
@@ -3141,6 +3620,57 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
                       来自 image.z.ai 的 Cookie session
                     </p>
                   </div>
+                </>
+              ) : platform === 'copilot' ? (
+                <>
+                  <div className="space-y-3">
+                    <Label className="text-base font-semibold">GitHub Copilot 授权</Label>
+                    {!copilotDeviceCode ? (
+                      <p className="text-sm text-muted-foreground">
+                        点击按钮后将打开 GitHub 授权页面，在页面中输入验证码完成授权。
+                      </p>
+                    ) : null}
+                  </div>
+
+                  {copilotDeviceCode ? (
+                    <div className="flex flex-col items-center gap-4 p-6">
+                      <p className="text-sm text-muted-foreground">请在浏览器中输入以下验证码：</p>
+                      <div className="flex items-center gap-2">
+                        <code className="text-3xl font-bold tracking-widest bg-muted px-6 py-3 rounded-lg">
+                          {copilotDeviceCode}
+                        </code>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="cursor-pointer"
+                          onClick={() => {
+                            navigator.clipboard.writeText(copilotDeviceCode);
+                            (toasterRef.current?.show ?? showToast)({
+                              title: '已复制',
+                              message: '验证码已复制到剪贴板',
+                              variant: 'success',
+                              position: 'top-right',
+                            });
+                          }}
+                        >
+                          <IconCopy className="w-4 h-4 mr-1" />
+                          复制
+                        </Button>
+                      </div>
+                      <a
+                        href={copilotVerificationUri}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-blue-500 underline inline-flex items-center gap-1"
+                      >
+                        打开 GitHub 验证页面
+                        <IconExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                      {copilotIsPolling && (
+                        <p className="text-xs text-muted-foreground animate-pulse">等待授权中...</p>
+                      )}
+                    </div>
+                  ) : null}
                 </>
               ) : platform === 'codex' ? (
                 <>
@@ -4410,6 +4940,211 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
                     />
                   </div>
                 </>
+              ) : platform === 'kiro' && kiroProvider === 'external_idp' && kiroExternalIdpMethod === 'json_import' ? (
+                <>
+                  <div className="space-y-3">
+                    <Label className="text-base font-semibold">JSON 单个/批量导入</Label>
+                    <p className="text-sm text-muted-foreground">
+                      粘贴 JSON 全文（单个对象或数组）；支持 camelCase 和 snake_case 字段名。
+                    </p>
+                  </div>
+
+                  <div className="p-4 bg-muted/30 border border-border rounded-lg">
+                    <p className="text-xs text-muted-foreground">
+                      必填字段：refreshToken / refresh_token、clientId / client_id、tokenEndpoint / token_endpoint。
+                      可选字段：issuerUrl、scopes、region（默认 us-east-1）。
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label htmlFor="kiro-external-idp-json-text" className="text-base font-semibold">
+                      JSON 全文
+                    </Label>
+                    <Textarea
+                      id="kiro-external-idp-json-text"
+                      placeholder={'示例：{"refreshToken":"xxx","clientId":"xxx","tokenEndpoint":"https://login.microsoftonline.com/.../token","scopes":"..."}'}
+                      value={kiroExternalIdpJsonText}
+                      onChange={(e) => setKiroExternalIdpJsonText(e.target.value)}
+                      className="font-mono text-sm [field-sizing:fixed] min-h-[180px] max-h-[360px] overflow-y-auto"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      支持单个对象 {'{}'} 或数组 {'[]'}；字段名支持 camelCase（refreshToken）和 snake_case（refresh_token）。
+                    </p>
+                  </div>
+
+                  {kiroExternalIdpJsonResults.length > 0 && (
+                    <div className="space-y-3">
+                      <Label className="text-base font-semibold">导入清单</Label>
+                      <div className="space-y-2">
+                        {kiroExternalIdpJsonResults.map((r) => (
+                          <div
+                            key={r.index}
+                            className="flex items-start justify-between gap-3 rounded-lg border p-3"
+                          >
+                            <div className="min-w-0 flex-1 space-y-1">
+                              <p className="text-sm">
+                                <span className="font-mono text-xs text-muted-foreground mr-2">
+                                  #{r.index}
+                                </span>
+                                <span className={r.accountName ? '' : 'text-muted-foreground'}>
+                                  {r.accountName || '（未获取名称）'}
+                                </span>
+                              </p>
+                              {r.message && (
+                                <p className="text-xs text-muted-foreground break-words">{r.message}</p>
+                              )}
+                            </div>
+                            <Badge
+                              variant={
+                                r.status === 'success'
+                                  ? 'secondary'
+                                  : r.status === 'error'
+                                  ? 'destructive'
+                                  : 'outline'
+                              }
+                            >
+                              {r.status === 'success'
+                                ? '成功'
+                                : r.status === 'error'
+                                ? '失败'
+                                : '处理中'}
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : platform === 'kiro' && kiroProvider === 'external_idp' && kiroExternalIdpMethod === 'manual_import' ? (
+                <>
+                  <div className="space-y-3">
+                    <Label className="text-base font-semibold">External IdP 账户导入</Label>
+                    <p className="text-sm text-muted-foreground">
+                      提供 refresh_token + client_id + token_endpoint；服务端不会回传 token。
+                    </p>
+                  </div>
+
+                  <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                      <strong>提示</strong>
+                      <br />
+                      refresh_token 属于敏感信息，请只在可信环境中粘贴，并避免截图/外发。
+                    </p>
+                  </div>
+
+                  <div className="p-4 bg-muted/30 border border-border rounded-lg">
+                    <p className="text-xs text-muted-foreground">
+                      账号名称将自动使用邮箱（服务端校验通过后填充），无需手动填写。
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label htmlFor="kiro-external-idp-token-endpoint" className="text-base font-semibold">
+                      token_endpoint <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="kiro-external-idp-token-endpoint"
+                      placeholder="例如：https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+                      value={kiroExternalIdpTokenEndpoint}
+                      onChange={(e) => setKiroExternalIdpTokenEndpoint(e.target.value)}
+                      className="h-12 font-mono text-sm"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label htmlFor="kiro-external-idp-client-id" className="text-base font-semibold">
+                      client_id <span className="text-red-500">*</span>
+                    </Label>
+                    <Input
+                      id="kiro-external-idp-client-id"
+                      placeholder="请输入 client_id"
+                      value={kiroExternalIdpClientId}
+                      onChange={(e) => setKiroExternalIdpClientId(e.target.value)}
+                      className="h-12 font-mono text-sm"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label htmlFor="kiro-external-idp-scopes" className="text-base font-semibold">
+                      scopes（可选）
+                    </Label>
+                    <Input
+                      id="kiro-external-idp-scopes"
+                      placeholder="例如：api://xxx/codewhisperer:conversations offline_access"
+                      value={kiroExternalIdpScopes}
+                      onChange={(e) => setKiroExternalIdpScopes(e.target.value)}
+                      className="h-12 font-mono text-sm"
+                      autoComplete="off"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      空格分隔的 OAuth2 scope 列表，用于 token 刷新请求。
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label htmlFor="kiro-external-idp-issuer-url" className="text-base font-semibold">
+                      issuer_url（可选）
+                    </Label>
+                    <Input
+                      id="kiro-external-idp-issuer-url"
+                      placeholder="例如：https://login.microsoftonline.com/{tenant}/v2.0"
+                      value={kiroExternalIdpIssuerUrl}
+                      onChange={(e) => setKiroExternalIdpIssuerUrl(e.target.value)}
+                      className="h-12 font-mono text-sm"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* Profile ARN（可选） */}
+                  <div className="space-y-3">
+                    <Label htmlFor="kiro-external-idp-profile-arn" className="text-base font-semibold">
+                      profileArn（可选，推荐提供）
+                    </Label>
+                    <Input
+                      id="kiro-external-idp-profile-arn"
+                      placeholder="例如：arn:aws:codewhisperer:us-east-1:XXXX:profile/YYYY"
+                      value={kiroExternalIdpProfileArn}
+                      onChange={(e) => setKiroExternalIdpProfileArn(e.target.value)}
+                      className="h-12 font-mono text-sm"
+                      autoComplete="off"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      从 kiro-cli 数据库获取（~/Library/Application Support/kiro-cli/data.sqlite3 中 state 表的 api.codewhisperer.profile 键）。
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label htmlFor="kiro-external-idp-region" className="text-base font-semibold">
+                      API region（默认 us-east-1）
+                    </Label>
+                    <Input
+                      id="kiro-external-idp-region"
+                      placeholder="例如：us-east-1"
+                      value={kiroExternalIdpRegion}
+                      onChange={(e) => setKiroExternalIdpRegion(e.target.value)}
+                      className="h-12 font-mono text-sm"
+                      autoComplete="off"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Kiro/Amazon Q Developer API 区域，通常为 us-east-1。
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label htmlFor="kiro-external-idp-refresh-token" className="text-base font-semibold">
+                      refresh_token <span className="text-red-500">*</span>
+                    </Label>
+                    <Textarea
+                      id="kiro-external-idp-refresh-token"
+                      placeholder="在此粘贴 refresh_token"
+                      value={kiroExternalIdpRefreshToken}
+                      onChange={(e) => setKiroExternalIdpRefreshToken(e.target.value)}
+                      className="font-mono text-sm [field-sizing:fixed] min-h-[80px] max-h-[160px] overflow-y-auto"
+                    />
+                  </div>
+                </>
               ) : platform === 'kiro' ? (
                 <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
                   <p className="text-sm text-yellow-600 dark:text-yellow-400">
@@ -4506,6 +5241,24 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
               >
                 完成添加
               </StatefulButton>
+            ) : platform === 'copilot' ? (
+              copilotIsPolling ? (
+                <Button
+                  variant="outline"
+                  onClick={() => resetCopilotState()}
+                  className="flex-1 cursor-pointer"
+                >
+                  取消授权
+                </Button>
+              ) : (
+                <StatefulButton
+                  onClick={handleStartCopilotDeviceFlow}
+                  disabled={copilotIsStarting}
+                  className="flex-1 cursor-pointer"
+                >
+                  {copilotIsStarting ? '正在启动...' : '开始 GitHub 授权'}
+                </StatefulButton>
+              )
             ) : platform === 'codex' ? (
               codexLoginMethod === 'json' ? (
                 <StatefulButton
@@ -4654,6 +5407,35 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
                     关闭
                   </Button>
                 )
+              ) : kiroProvider === 'external_idp' ? (
+                kiroExternalIdpMethod === 'manual_import' ? (
+                  <StatefulButton
+                    onClick={handleImportKiroExternalIdpAccount}
+                    disabled={
+                      !kiroExternalIdpRefreshToken.trim() ||
+                      !kiroExternalIdpClientId.trim() ||
+                      !kiroExternalIdpTokenEndpoint.trim()
+                    }
+                    className="flex-1 cursor-pointer"
+                  >
+                    完成导入
+                  </StatefulButton>
+                ) : kiroExternalIdpMethod === 'json_import' ? (
+                  <StatefulButton
+                    onClick={handleImportKiroExternalIdpJson}
+                    disabled={!kiroExternalIdpJsonText.trim() || isKiroExternalIdpJsonImporting}
+                    className="flex-1 cursor-pointer"
+                  >
+                    {isKiroExternalIdpJsonImporting ? '导入中...' : '解析并导入'}
+                  </StatefulButton>
+                ) : (
+                  <Button
+                    onClick={handleClose}
+                    className="flex-1 cursor-pointer"
+                  >
+                    关闭
+                  </Button>
+                )
               ) : (
                 <Button
                   onClick={handleClose}
@@ -4693,6 +5475,7 @@ export function AddAccountDrawer({ open, onOpenChange, onSuccess }: AddAccountDr
                 kiroProvider === 'social' ? !kiroLoginMethod :
                 kiroProvider === 'aws_idc' ? !kiroAwsIdcMethod :
                 kiroProvider === 'enterprise' ? !kiroEnterpriseMethod :
+                kiroProvider === 'external_idp' ? !kiroExternalIdpMethod :
                 true
               }
               className="flex-1 cursor-pointer"

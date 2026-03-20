@@ -1,4 +1,10 @@
 services:
+  web:
+    image: antihub-web:local
+    build:
+      context: ./AntiHub
+      dockerfile: Dockerfile
+
   backend:
     image: antihub-backend:local
     build:

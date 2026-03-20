@@ -22,6 +22,7 @@ from app.models.user import User
 from app.services.plugin_api_service import PluginAPIService
 from app.services.kiro_service import KiroService
 from app.services.qwen_api_service import QwenAPIService
+from app.services.copilot_service import CopilotService
 from app.services.anthropic_adapter import AnthropicAdapter
 from app.services.usage_log_service import UsageLogService, SSEUsageTracker
 from app.services.kiro_anthropic_converter import KiroAnthropicConverter
@@ -101,6 +102,13 @@ def get_kiro_service(
     return KiroService(db, redis)
 
 
+def get_copilot_service(
+    db: AsyncSession = Depends(get_db_session),
+    redis: RedisClient = Depends(get_redis),
+) -> CopilotService:
+    return CopilotService(db, redis)
+
+
 async def _create_message_impl(
     request: AnthropicMessagesRequest,
     raw_request: Request,
@@ -108,6 +116,7 @@ async def _create_message_impl(
     antigravity_service: PluginAPIService,
     qwen_service: QwenAPIService,
     kiro_service: KiroService,
+    copilot_service: CopilotService,
     anthropic_version: Optional[str],
     anthropic_beta: Optional[str],
     *,
@@ -153,11 +162,12 @@ async def _create_message_impl(
 
             # 如果是 JWT token 认证（无 _config_type），检查请求头（保持现有约束）
             api_type = raw_request.headers.get("X-Api-Type")
-            if api_type in ["kiro", "antigravity", "qwen"]:
+            if api_type in ["kiro", "antigravity", "qwen", "copilot"]:
                 config_type = api_type
 
             effective_config_type = config_type or "antigravity"
         use_kiro = config_type == "kiro"
+        use_copilot = config_type == "copilot"
 
         if use_kiro:
             # 检查beta权限
@@ -228,6 +238,11 @@ async def _create_message_impl(
                     if use_kiro:
                         # 使用Kiro服务
                         openai_stream = kiro_service.chat_completions_stream(
+                            user_id=current_user.id,
+                            request_data=upstream_request,
+                        )
+                    elif use_copilot:
+                        openai_stream = copilot_service.chat_completions_stream(
                             user_id=current_user.id,
                             request_data=upstream_request,
                         )
@@ -329,6 +344,11 @@ async def _create_message_impl(
         if use_kiro:
             # 使用Kiro服务的流式接口
             openai_stream = kiro_service.chat_completions_stream(
+                user_id=current_user.id,
+                request_data=upstream_request,
+            )
+        elif use_copilot:
+            openai_stream = copilot_service.chat_completions_stream(
                 user_id=current_user.id,
                 request_data=upstream_request,
             )
@@ -588,6 +608,7 @@ async def create_message(
     antigravity_service: PluginAPIService = Depends(get_plugin_api_service),
     qwen_service: QwenAPIService = Depends(get_qwen_api_service),
     kiro_service: KiroService = Depends(get_kiro_service),
+    copilot_service: CopilotService = Depends(get_copilot_service),
     anthropic_version: Optional[str] = Header(None, alias="anthropic-version"),
     anthropic_beta: Optional[str] = Header(None, alias="anthropic-beta")
 ):
@@ -616,6 +637,7 @@ async def create_message(
         antigravity_service=antigravity_service,
         qwen_service=qwen_service,
         kiro_service=kiro_service,
+        copilot_service=copilot_service,
         anthropic_version=anthropic_version,
         anthropic_beta=anthropic_beta,
         endpoint="/v1/messages",
@@ -653,6 +675,7 @@ async def create_message_cc(
     antigravity_service: PluginAPIService = Depends(get_plugin_api_service),
     qwen_service: QwenAPIService = Depends(get_qwen_api_service),
     kiro_service: KiroService = Depends(get_kiro_service),
+    copilot_service: CopilotService = Depends(get_copilot_service),
     anthropic_version: Optional[str] = Header(None, alias="anthropic-version"),
     anthropic_beta: Optional[str] = Header(None, alias="anthropic-beta")
 ):
@@ -670,6 +693,7 @@ async def create_message_cc(
         antigravity_service=antigravity_service,
         qwen_service=qwen_service,
         kiro_service=kiro_service,
+        copilot_service=copilot_service,
         anthropic_version=anthropic_version,
         anthropic_beta=anthropic_beta,
         endpoint="/cc/v1/messages",

@@ -11,6 +11,7 @@ APIKeyConfigType = Literal[
     "kiro",
     "qwen",
     "codex",
+    "copilot",
     "gemini-cli",
     "zai-tts",
     "zai-image",
@@ -22,7 +23,7 @@ class APIKeyCreate(BaseModel):
     name: Optional[str] = Field(None, description="密钥名称，方便识别")
     config_type: APIKeyConfigType = Field(
         "antigravity",
-        description="配置类型：antigravity / kiro / qwen / codex / gemini-cli / zai-tts / zai-image",
+        description="配置类型：antigravity / kiro / qwen / codex / copilot / gemini-cli / zai-tts / zai-image",
     )
 
 

@@ -352,7 +352,7 @@ async def get_request_usage_logs(
     offset: int = Query(0, description="偏移量（>=0）"),
     start_date: Optional[str] = Query(None, description="开始时间（ISO8601）"),
     end_date: Optional[str] = Query(None, description="结束时间（ISO8601）"),
-    config_type: Optional[str] = Query(None, description="antigravity/kiro/qwen/codex/gemini-cli/zai-tts/zai-image"),
+    config_type: Optional[str] = Query(None, description="antigravity/kiro/qwen/copilot/codex/gemini-cli/zai-tts/zai-image"),
     client_app: Optional[str] = Query(None, description="客户端标识（来自 X-App 请求头）"),
     success: Optional[bool] = Query(None, description="true=只看成功，false=只看失败，不传=全部"),
     model_name: Optional[str] = Query(None, description="模型名过滤"),
@@ -364,8 +364,8 @@ async def get_request_usage_logs(
             raise ValueError("limit 必须在 1-200 之间")
         if offset < 0:
             raise ValueError("offset 不能小于 0")
-        if config_type and config_type not in ("antigravity", "kiro", "qwen", "codex", "gemini-cli", "zai-tts", "zai-image"):
-            raise ValueError("config_type 必须是 antigravity / kiro / qwen / codex / gemini-cli / zai-tts / zai-image")
+        if config_type and config_type not in ("antigravity", "kiro", "qwen", "copilot", "codex", "gemini-cli", "zai-tts", "zai-image"):
+            raise ValueError("config_type 必须是 antigravity / kiro / qwen / copilot / codex / gemini-cli / zai-tts / zai-image")
 
         start_at = _parse_iso_datetime(start_date)
         end_at = _parse_iso_datetime(end_date)
@@ -416,14 +416,14 @@ async def get_request_usage_logs(
 async def get_request_usage_stats(
     start_date: Optional[str] = Query(None, description="开始时间（ISO8601）"),
     end_date: Optional[str] = Query(None, description="结束时间（ISO8601）"),
-    config_type: Optional[str] = Query(None, description="antigravity/kiro/qwen/codex/gemini-cli/zai-tts/zai-image"),
+    config_type: Optional[str] = Query(None, description="antigravity/kiro/qwen/copilot/codex/gemini-cli/zai-tts/zai-image"),
     client_app: Optional[str] = Query(None, description="客户端标识（来自 X-App 请求头）"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
     try:
-        if config_type and config_type not in ("antigravity", "kiro", "qwen", "codex", "gemini-cli", "zai-tts", "zai-image"):
-            raise ValueError("config_type 必须是 antigravity / kiro / qwen / codex / gemini-cli / zai-tts / zai-image")
+        if config_type and config_type not in ("antigravity", "kiro", "qwen", "copilot", "codex", "gemini-cli", "zai-tts", "zai-image"):
+            raise ValueError("config_type 必须是 antigravity / kiro / qwen / copilot / codex / gemini-cli / zai-tts / zai-image")
 
         start_at = _parse_iso_datetime(start_date)
         end_at = _parse_iso_datetime(end_date)
