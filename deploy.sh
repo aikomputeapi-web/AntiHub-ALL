@@ -1,21 +1,21 @@
 #!/bin/bash
-# AntiHub-ALL 一键部署脚本
-# 适用于 Linux 系统
+# AntiHub-ALL One-Click Deployment Script
+# For Linux systems
 
 set -e
 
-# 确保从脚本所在目录运行（避免在其它目录执行导致找不到 compose/.env）
+# Ensure the script runs from its own directory (avoid missing compose/.env when run elsewhere)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# 颜色定义
+# Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# 日志函数
+# Logging functions
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
 }
@@ -32,59 +32,59 @@ log_prompt() {
     echo -e "${BLUE}[INPUT]${NC} $1"
 }
 
-# 检查命令是否存在
+# Check if a command exists
 check_command() {
     if ! command -v "$1" &> /dev/null; then
-        log_error "$1 未安装，请先安装 $1"
+        log_error "$1 is not installed. Please install $1 first"
         exit 1
     fi
 }
 
-# 生成随机密钥
+# Generate a random secret key
 generate_random_key() {
     if command -v openssl &> /dev/null; then
         openssl rand -hex 32
         return
     fi
 
-    # 仅装了 Docker 的环境：用容器生成随机值，避免依赖宿主机 openssl
+    # Docker-only environment: use a container to generate random values, avoiding host openssl dependency
     docker run --rm python:3.11-alpine python -c "import secrets; print(secrets.token_hex(32))"
 }
 
-# 生成 Fernet 密钥（用于 PLUGIN_API_ENCRYPTION_KEY）
+# Generate a Fernet key (used for PLUGIN_API_ENCRYPTION_KEY)
 generate_fernet_key() {
     python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>/dev/null || \
     docker run --rm python:3.11-alpine python -c "import os, base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
 }
 
-# 读取用户输入（带默认值）
+# Read user input (with default value)
 read_with_default() {
     local prompt="$1"
     local default="$2"
     local value
 
     read -p "$prompt [$default]: " value
-    # 兼容某些终端/粘贴会带 CR（\r）的情况：避免后续写入 .env / 解析变量时出错
+    # Handle terminals/pastes that may include CR (\r): prevent errors when writing to .env / parsing variables
     value=${value//$'\r'/}
     echo "${value:-$default}"
 }
 
-# 读取密码（明文输入一次）
+# Read password (plaintext input, single entry)
 read_password() {
     local prompt="$1"
     local min_length="${2:-1}"
     local password
 
     while true; do
-        # 按用户需求：明文输入一次，不再二次确认
+        # As per user requirements: plaintext input once, no secondary confirmation
         read -p "$prompt: " password
         password=${password//$'\r'/}
         if [ -z "$password" ]; then
-            log_error "密码不能为空"
+            log_error "Password cannot be empty"
             continue
         fi
         if [ "${#password}" -lt "$min_length" ]; then
-            log_error "密码长度至少 ${min_length} 位"
+            log_error "Password must be at least ${min_length} characters"
             continue
         fi
         echo "$password"
@@ -92,7 +92,7 @@ read_password() {
     done
 }
 
-# 写入 .env：不依赖 sed（避免特殊字符/终端粘贴导致 sed 解析报错）
+# Write .env file: does not rely on sed (avoids parsing errors from special characters / terminal pastes)
 write_env_file() {
     local env_file="$1"
     local tmp_file="${env_file}.tmp"
@@ -167,157 +167,157 @@ validate_admin_password() {
     local admin_password
     admin_password=$(get_env_value "$env_file" "ADMIN_PASSWORD")
 
-    # 允许留空：留空表示不初始化管理员账号（适用于仅 OAuth 登录场景）
+    # Allow empty: empty means no admin account initialization (for OAuth-only login scenarios)
     if [ -z "$admin_password" ]; then
         return 0
     fi
 
     if [ "${#admin_password}" -lt "$min_length" ]; then
-        log_error "ADMIN_PASSWORD 长度至少 ${min_length} 位（当前 ${#admin_password} 位），否则后端会报参数校验错误/无法登录"
-        log_error "请修改 ${env_file} 中的 ADMIN_PASSWORD 后重试"
+        log_error "ADMIN_PASSWORD must be at least ${min_length} characters (currently ${#admin_password} characters), otherwise the backend will throw a validation error / login will fail"
+        log_error "Please update ADMIN_PASSWORD in ${env_file} and try again"
         return 1
     fi
 
     return 0
 }
 
-# 修复 docker 目录权限（解决 NAS 等环境下的权限问题）
+# Fix docker directory permissions (resolves permission issues on NAS and similar environments)
 fix_permissions() {
-    log_info "修复 docker 目录权限..."
+    log_info "Fixing docker directory permissions..."
 
-    # 仅处理 docker 目录，避免误改 .env / 仓库其它文件权限
+    # Only process the docker directory to avoid accidentally changing .env / other repo file permissions
     TARGET_DIR="$SCRIPT_DIR/docker"
     if [ ! -d "$TARGET_DIR" ]; then
-        log_warn "未找到 docker 目录，跳过权限修复"
+        log_warn "Docker directory not found, skipping permission fix"
         return 0
     fi
 
-    # 目录设置为 755 (rwxr-xr-x)
+    # Set directories to 755 (rwxr-xr-x)
     find "$TARGET_DIR" -type d -exec chmod 755 {} \; 2>/dev/null || true
 
-    # 普通文件设置为 644 (rw-r--r--)
+    # Set regular files to 644 (rw-r--r--)
     find "$TARGET_DIR" -type f -exec chmod 644 {} \; 2>/dev/null || true
 
-    # 脚本文件设置为 755 (rwxr-xr-x)
+    # Set script files to 755 (rwxr-xr-x)
     find "$TARGET_DIR" -name "*.sh" -type f -exec chmod 755 {} \; 2>/dev/null || true
 
-    log_info "docker 目录权限修复完成"
+    log_info "Docker directory permissions fixed"
 }
 
-# 初始化 compose 环境（供部署/升级/卸载共用）
+# Initialize compose environment (shared by deploy/upgrade/uninstall)
 prepare_compose() {
     if [ ! -f docker-compose.yml ]; then
-        log_error "未找到 docker-compose.yml，请在项目根目录运行此脚本"
+        log_error "docker-compose.yml not found. Please run this script from the project root directory"
         exit 1
     fi
 
-    # 检查依赖
-    log_info "检查系统依赖..."
+    # Check dependencies
+    log_info "Checking system dependencies..."
     check_command docker
 
-    # 检测 docker compose 命令（优先使用新版本）
+    # Detect docker compose command (prefer the newer version)
     if docker compose version &> /dev/null; then
         DOCKER_COMPOSE="docker compose"
     elif command -v docker-compose &> /dev/null; then
         DOCKER_COMPOSE="docker-compose"
     else
-        log_error "docker-compose 或 docker compose 未安装"
+        log_error "Neither docker-compose nor docker compose is installed"
         exit 1
     fi
-    log_info "使用命令: $DOCKER_COMPOSE"
+    log_info "Using command: $DOCKER_COMPOSE"
 
-    # 组合 docker compose 文件：基础 compose（web/backend/postgres/redis）
+    # Compose docker compose files: base compose (web/backend/postgres/redis)
     COMPOSE_FILES="-f docker-compose.yml"
 
     compose() {
         $DOCKER_COMPOSE $COMPOSE_FILES "$@"
     }
 
-    # 检查 Docker 是否运行
+    # Check if Docker is running
     if ! docker info &> /dev/null; then
-        log_error "Docker 未运行，请先启动 Docker 服务"
+        log_error "Docker is not running. Please start the Docker service first"
         exit 1
     fi
 }
 
-# 部署（首次部署 / 重装）
+# Deploy (first-time deployment / reinstall)
 deploy() {
-    log_info "开始部署 AntiHub-ALL..."
+    log_info "Starting AntiHub-ALL deployment..."
     echo ""
 
-    # 0. 修复权限（解决 NAS 等环境下的权限问题）
+    # 0. Fix permissions (resolves permission issues on NAS and similar environments)
     fix_permissions
 
-    # 1. 初始化 compose 环境
+    # 1. Initialize compose environment
     prepare_compose
     if ! command -v openssl &> /dev/null; then
-        log_warn "openssl 未安装，将用 Docker 生成随机密钥（可能会额外拉取 python:3.11-alpine 镜像）"
+        log_warn "openssl is not installed. Random keys will be generated via Docker (may pull python:3.11-alpine image)"
     fi
 
-    # 2. 检查 .env 文件
+    # 2. Check .env file
     ENV_BACKUP_FILE=""
     if [ -f .env ]; then
-        log_warn ".env 文件已存在"
-        read -p "是否覆盖现有配置？(y/N): " -n 1 -r
+        log_warn ".env file already exists"
+        read -p "Overwrite existing configuration? (y/N): " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log_info "保留现有配置，跳过环境变量生成"
+            log_info "Keeping existing configuration, skipping environment variable generation"
             ENV_EXISTS=true
         else
             ENV_EXISTS=false
             ENV_BACKUP_FILE=".env.bak.$(date +\"%Y%m%d_%H%M%S\")"
             cp .env "$ENV_BACKUP_FILE"
-            log_info "已备份原 .env 到 ${ENV_BACKUP_FILE}"
+            log_info "Backed up original .env to ${ENV_BACKUP_FILE}"
         fi
     else
         ENV_EXISTS=false
     fi
 
-    # 3. 生成环境变量配置
+    # 3. Generate environment variable configuration
     if [ "$ENV_EXISTS" = false ]; then
-        log_info "开始配置部署参数..."
+        log_info "Starting deployment parameter configuration..."
         echo ""
 
         if [ ! -f .env.example ]; then
-            log_error ".env.example 文件不存在"
+            log_error ".env.example file not found"
             exit 1
         fi
 
         cp .env.example .env
 
-        # 3.1 配置端口
-        log_info "=== 端口配置 ==="
-        log_prompt "配置服务端口（直接回车使用默认值）"
+        # 3.1 Configure ports
+        log_info "=== Port Configuration ==="
+        log_prompt "Configure service ports (press Enter to use defaults)"
         echo ""
 
-        WEB_PORT=$(read_with_default "Web 前端端口（对外暴露）" "3000")
-        BACKEND_PORT=$(read_with_default "Backend 后端端口（仅本地）" "8000")
-        POSTGRES_PORT=$(read_with_default "PostgreSQL 数据库端口（仅本地）" "5432")
+        WEB_PORT=$(read_with_default "Web frontend port (externally exposed)" "3000")
+        BACKEND_PORT=$(read_with_default "Backend port (local only)" "8000")
+        POSTGRES_PORT=$(read_with_default "PostgreSQL database port (local only)" "5432")
 
         echo ""
-        log_info "端口配置完成："
+        log_info "Port configuration complete:"
         echo "  Web: $WEB_PORT (0.0.0.0:$WEB_PORT)"
         echo "  Backend: $BACKEND_PORT (127.0.0.1:$BACKEND_PORT)"
         echo "  PostgreSQL: $POSTGRES_PORT (127.0.0.1:$POSTGRES_PORT)"
         echo ""
 
-        # 3.2 访问方式（影响登录 Cookie 的 Secure 属性）
-        log_info "=== 访问方式（影响登录 Cookie） ==="
-        echo "请选择你准备如何访问前端："
-        echo "  1) 域名 + HTTPS（推荐，Cookie 将带 Secure）"
-        echo "  2) IP 直连 + HTTP（测试/内网，Cookie 不带 Secure）"
+        # 3.2 Access method (affects the Secure attribute of login cookies)
+        log_info "=== Access Method (affects login cookies) ==="
+        echo "Select how you plan to access the frontend:"
+        echo "  1) Domain + HTTPS (recommended, cookies will have Secure flag)"
+        echo "  2) Direct IP + HTTP (testing/intranet, cookies without Secure flag)"
 
         COOKIE_HTTP="HTTPS"
         DOMAIN_NAME=""
         while true; do
-            read -p "请选择 [1-2] (默认 1): " access_choice
+            read -p "Select [1-2] (default 1): " access_choice
             access_choice=${access_choice//$'\r'/}
             access_choice=${access_choice:-1}
 
             case "$access_choice" in
                 1)
                     COOKIE_HTTP="HTTPS"
-                    read -p "域名（可选，仅用于部署完成后的提示输出；留空跳过）: " DOMAIN_NAME
+                    read -p "Domain name (optional, only used for post-deployment info display; leave empty to skip): " DOMAIN_NAME
                     DOMAIN_NAME=${DOMAIN_NAME//$'\r'/}
                     ;;
                 2)
@@ -325,7 +325,7 @@ deploy() {
                     DOMAIN_NAME=""
                     ;;
                 *)
-                    log_warn "无效选择，请输入 1 或 2"
+                    log_warn "Invalid selection, please enter 1 or 2"
                     continue
                     ;;
             esac
@@ -334,23 +334,23 @@ deploy() {
         done
 
         echo ""
-        log_info "访问方式配置完成：COOKIE_HTTP=$COOKIE_HTTP"
+        log_info "Access method configured: COOKIE_HTTP=$COOKIE_HTTP"
         if [ -n "$DOMAIN_NAME" ]; then
-            echo "  域名: $DOMAIN_NAME"
+            echo "  Domain: $DOMAIN_NAME"
         fi
         echo ""
 
-        # 3.3 配置管理员账户
-        log_info "=== 管理员账户配置 ==="
-        ADMIN_USERNAME=$(read_with_default "管理员用户名" "admin")
-        log_prompt "设置管理员密码（至少 6 位，否则无法登录）"
-        ADMIN_PASSWORD=$(read_password "管理员密码" 6)
+        # 3.3 Configure admin account
+        log_info "=== Admin Account Configuration ==="
+        ADMIN_USERNAME=$(read_with_default "Admin username" "admin")
+        log_prompt "Set admin password (minimum 6 characters, otherwise login will fail)"
+        ADMIN_PASSWORD=$(read_password "Admin password" 6)
         echo ""
-        log_info "管理员账户配置完成"
+        log_info "Admin account configuration complete"
         echo ""
 
-        # 3.4 生成密钥
-        log_info "生成安全密钥..."
+        # 3.4 Generate secret keys
+        log_info "Generating security keys..."
         OLD_JWT_SECRET=$(get_env_value "$ENV_BACKUP_FILE" "JWT_SECRET_KEY")
         OLD_POSTGRES_PASSWORD=$(get_env_value "$ENV_BACKUP_FILE" "POSTGRES_PASSWORD")
         OLD_ENCRYPTION_KEY=$(get_env_value "$ENV_BACKUP_FILE" "PLUGIN_API_ENCRYPTION_KEY")
@@ -367,45 +367,45 @@ deploy() {
             POSTGRES_PASSWORD=$(generate_random_key | cut -c1-24)
         fi
 
-        log_info "生成 Fernet 加密密钥..."
+        log_info "Generating Fernet encryption key..."
         if [ -n "$OLD_ENCRYPTION_KEY" ] && [ "$OLD_ENCRYPTION_KEY" != "please-generate-a-valid-fernet-key" ]; then
             ENCRYPTION_KEY="$OLD_ENCRYPTION_KEY"
         else
             ENCRYPTION_KEY=$(generate_fernet_key)
         fi
 
-        # 3.5 替换 .env 中的占位符（兼容 Linux 和 macOS）
-        log_info "写入配置文件..."
+        # 3.5 Replace placeholders in .env (compatible with Linux and macOS)
+        log_info "Writing configuration file..."
         write_env_file ".env"
 
-        log_info "环境变量配置已生成"
+        log_info "Environment variable configuration generated"
         echo ""
     fi
 
-    # 3.6 校验关键配置（避免启动后才发现登录/校验错误）
+    # 3.6 Validate critical configuration (avoid discovering login/validation errors only after startup)
     validate_admin_password ".env" 6
 
-    # 4. 拉取镜像
-    log_info "拉取 Docker 镜像..."
+    # 4. Pull images
+    log_info "Pulling Docker images..."
     compose pull
 
-    # 5. 停止旧容器（如果存在）
-    log_info "停止旧容器..."
+    # 5. Stop old containers (if any)
+    log_info "Stopping old containers..."
     compose down 2>/dev/null || true
 
-    # 6. 先启动基础依赖（数据库 / 缓存），并完成数据库初始化，再启动主容器
-    log_info "启动数据库与缓存（postgres/redis）..."
+    # 6. Start base dependencies (database/cache) first, complete DB initialization, then start main containers
+    log_info "Starting database and cache (postgres/redis)..."
     compose up -d postgres redis
 
-    log_info "检查 PostgreSQL 状态..."
+    log_info "Checking PostgreSQL status..."
     POSTGRES_USER_CHECK=$(grep "^POSTGRES_USER=" .env | cut -d'=' -f2 || echo "antihub")
     for i in {1..30}; do
         if compose exec -T postgres pg_isready -U "$POSTGRES_USER_CHECK" &> /dev/null; then
-            log_info "PostgreSQL 已就绪"
+            log_info "PostgreSQL is ready"
             break
         fi
         if [ $i -eq 30 ]; then
-            log_error "PostgreSQL 启动超时"
+            log_error "PostgreSQL startup timed out"
             exit 1
         fi
         sleep 2
@@ -414,8 +414,8 @@ deploy() {
     POSTGRES_USER_ENV=$(grep "^POSTGRES_USER=" .env | cut -d'=' -f2 || echo "antihub")
     POSTGRES_PASSWORD_ENV=$(grep "^POSTGRES_PASSWORD=" .env | cut -d'=' -f2- || echo "please-change-me")
     POSTGRES_DB_ENV=$(grep "^POSTGRES_DB=" .env | cut -d'=' -f2 || echo "antihub")
-    # 初始化/同步数据库（Backend 主库）
-    log_info "初始化数据库（${POSTGRES_DB_ENV}）..."
+    # Initialize/sync database (Backend main database)
+    log_info "Initializing database (${POSTGRES_DB_ENV})..."
 
     compose exec -T postgres psql -X -v ON_ERROR_STOP=1 \
         -U "$POSTGRES_USER_ENV" -d postgres \
@@ -430,30 +430,30 @@ SELECT format('ALTER DATABASE %I OWNER TO %I', :'main_db', :'su_user')
 WHERE EXISTS (SELECT 1 FROM pg_database WHERE datname = :'main_db') \gexec
 EOSQL
 
-    log_info "启动主服务（backend/web）..."
+    log_info "Starting main services (backend/web)..."
     compose up -d backend web
 
-    # 检查服务状态
-    log_info "检查服务状态..."
+    # Check service status
+    log_info "Checking service status..."
     sleep 3
 
     FAILED_SERVICES=$(compose ps --services --filter "status=exited")
     if [ -n "$FAILED_SERVICES" ]; then
-        log_error "以下服务启动失败："
+        log_error "The following services failed to start:"
         echo "$FAILED_SERVICES"
-        log_info "查看日志："
+        log_info "Viewing logs:"
         compose logs --tail=50
         exit 1
     fi
 
-    # 8. 输出部署信息
+    # 8. Output deployment information
     echo ""
     log_info "=========================================="
-    log_info "AntiHub-ALL 部署完成！"
+    log_info "AntiHub-ALL deployment complete!"
     log_info "=========================================="
     echo ""
 
-    # 读取端口配置
+    # Read port configuration
     WEB_PORT=$(grep "^WEB_PORT=" .env | cut -d'=' -f2 || echo "3000")
     BACKEND_PORT=$(grep "^BACKEND_PORT=" .env | cut -d'=' -f2 || echo "8000")
     POSTGRES_PORT=$(grep "^POSTGRES_PORT=" .env | cut -d'=' -f2 || echo "5432")
@@ -465,152 +465,152 @@ EOSQL
     COOKIE_HTTP=${COOKIE_HTTP//$'\r'/}
     COOKIE_HTTP_UPPER=$(echo "$COOKIE_HTTP" | tr '[:lower:]' '[:upper:]')
 
-    # 获取服务器 IP
+    # Get server IP
     SERVER_IP=$(hostname -I | awk '{print $1}' || echo "YOUR_SERVER_IP")
 
-    log_info "访问地址："
+    log_info "Access URLs:"
     if [ "$COOKIE_HTTP_UPPER" = "HTTPS" ]; then
         if [ -n "$DOMAIN_NAME" ]; then
-            echo "  前端（HTTPS）: https://${DOMAIN_NAME}"
+            echo "  Frontend (HTTPS): https://${DOMAIN_NAME}"
         else
-            echo "  前端（HTTPS）: https://<your-domain>"
+            echo "  Frontend (HTTPS): https://<your-domain>"
         fi
-        echo "  Web 上游（给反代用）: http://127.0.0.1:${WEB_PORT}"
+        echo "  Web upstream (for reverse proxy): http://127.0.0.1:${WEB_PORT}"
     else
-        echo "  前端（对外）: http://${SERVER_IP}:${WEB_PORT}"
-        echo "  前端（本地）: http://localhost:${WEB_PORT}"
+        echo "  Frontend (external): http://${SERVER_IP}:${WEB_PORT}"
+        echo "  Frontend (local): http://localhost:${WEB_PORT}"
     fi
-    echo "  后端（仅本地）: http://127.0.0.1:${BACKEND_PORT}"
-    echo "  Cookie 模式: ${COOKIE_HTTP_UPPER}（HTTP=不加 Secure；HTTPS=加 Secure）"
+    echo "  Backend (local only): http://127.0.0.1:${BACKEND_PORT}"
+    echo "  Cookie mode: ${COOKIE_HTTP_UPPER} (HTTP = no Secure flag; HTTPS = Secure flag enabled)"
     echo ""
-    log_info "反向代理提示（必读）："
-    echo "  需要把 /backend 转发到后端，否则前端请求会 404"
+    log_info "Reverse proxy notes (must read):"
+    echo "  You must forward /backend to the backend, otherwise frontend requests will return 404"
     echo "  /        -> http://127.0.0.1:${WEB_PORT}"
     echo "  /backend -> http://127.0.0.1:${BACKEND_PORT}"
     echo ""
-    log_info "管理员账号："
-    echo "  用户名: ${ADMIN_USERNAME}"
-    echo "  密码: ${ADMIN_PASSWORD}"
+    log_info "Admin account:"
+    echo "  Username: ${ADMIN_USERNAME}"
+    echo "  Password: ${ADMIN_PASSWORD}"
     echo ""
-    log_info "数据库信息（仅本地访问）："
+    log_info "Database info (local access only):"
     echo "  PostgreSQL: localhost:${POSTGRES_PORT}"
-    echo "  数据库: ${POSTGRES_DB}"
+    echo "  Database: ${POSTGRES_DB}"
     echo ""
-    log_info "常用命令："
-    echo "  查看日志: $DOCKER_COMPOSE $COMPOSE_FILES logs -f"
-    echo "  停止服务: $DOCKER_COMPOSE $COMPOSE_FILES down"
-    echo "  重启服务: $DOCKER_COMPOSE $COMPOSE_FILES restart"
-    echo "  查看状态: $DOCKER_COMPOSE $COMPOSE_FILES ps"
+    log_info "Common commands:"
+    echo "  View logs: $DOCKER_COMPOSE $COMPOSE_FILES logs -f"
+    echo "  Stop services: $DOCKER_COMPOSE $COMPOSE_FILES down"
+    echo "  Restart services: $DOCKER_COMPOSE $COMPOSE_FILES restart"
+    echo "  View status: $DOCKER_COMPOSE $COMPOSE_FILES ps"
     echo ""
-    log_warn "重要提示："
-    echo "  1. 请妥善保管 .env 文件中的密钥"
-    echo "  2. Web 端口已对外暴露，建议配置防火墙"
-    echo "  3. Backend 和数据库仅本地访问（127.0.0.1）"
-    echo "  4. 反向代理需要配置 /backend -> http://127.0.0.1:${BACKEND_PORT}"
-    echo "  5. 用 IP 直连 HTTP 时设置 COOKIE_HTTP=HTTP；用域名 HTTPS 时保持 COOKIE_HTTP=HTTPS"
+    log_warn "Important notes:"
+    echo "  1. Keep the secret keys in the .env file safe"
+    echo "  2. The Web port is externally exposed; consider configuring a firewall"
+    echo "  3. Backend and database are local-access only (127.0.0.1)"
+    echo "  4. Reverse proxy must be configured: /backend -> http://127.0.0.1:${BACKEND_PORT}"
+    echo "  5. Use COOKIE_HTTP=HTTP for direct IP+HTTP access; keep COOKIE_HTTP=HTTPS for domain+HTTPS"
     echo ""
 }
 
 upgrade() {
-    log_info "开始升级 AntiHub-ALL（仅升级 web/backend，不操作数据库）..."
+    log_info "Starting AntiHub-ALL upgrade (web/backend only, database will not be modified)..."
     echo ""
 
     fix_permissions
     prepare_compose
 
     if [ ! -f .env ]; then
-        log_warn "未找到 .env，当前目录似乎还未部署，将进入一键部署流程"
+        log_warn ".env not found. This directory does not appear to have been deployed yet. Entering one-click deployment flow"
         deploy
         return 0
     fi
 
     validate_admin_password ".env" 6
 
-    # 备份 .env，避免误改或回滚困难
+    # Back up .env to prevent accidental changes or rollback difficulties
     ENV_BACKUP_FILE=".env.bak.upgrade.$(date +\"%Y%m%d_%H%M%S\")"
     cp .env "$ENV_BACKUP_FILE"
-    log_info "已备份 .env 到 ${ENV_BACKUP_FILE}"
+    log_info "Backed up .env to ${ENV_BACKUP_FILE}"
 
-    log_info "拉取最新 Docker 镜像（仅 web/backend）..."
+    log_info "Pulling latest Docker images (web/backend only)..."
     compose pull web backend
 
-    log_info "重启服务（仅 web/backend），不重启 postgres/redis..."
+    log_info "Restarting services (web/backend only), not restarting postgres/redis..."
     compose up -d --no-deps web backend
 
-    log_info "检查服务状态..."
+    log_info "Checking service status..."
     sleep 3
 
     FAILED_SERVICES=$(compose ps --services --filter "status=exited" | grep -E "^(web|backend)$" || true)
     if [ -n "$FAILED_SERVICES" ]; then
-        log_error "以下服务启动失败（web/backend）："
+        log_error "The following services failed to start (web/backend):"
         echo "$FAILED_SERVICES"
-        log_info "查看日志："
+        log_info "Viewing logs:"
         compose logs --tail=80
         exit 1
     fi
 
     DB_SERVICES_EXITED=$(compose ps --services --filter "status=exited" | grep -E "^(postgres|redis)$" || true)
     if [ -n "$DB_SERVICES_EXITED" ]; then
-        log_warn "检测到数据库/缓存服务未运行（本次升级不会操作它们）："
+        log_warn "Database/cache services detected as not running (this upgrade will not modify them):"
         echo "$DB_SERVICES_EXITED"
     fi
 
-    log_info "升级完成（数据库未被重启/重建）！"
-    echo "  查看状态: $DOCKER_COMPOSE $COMPOSE_FILES ps"
-    echo "  查看日志: $DOCKER_COMPOSE $COMPOSE_FILES logs -f"
+    log_info "Upgrade complete (database was not restarted/rebuilt)!"
+    echo "  View status: $DOCKER_COMPOSE $COMPOSE_FILES ps"
+    echo "  View logs: $DOCKER_COMPOSE $COMPOSE_FILES logs -f"
     echo ""
 }
 
 uninstall() {
-    log_warn "即将卸载 AntiHub-ALL"
+    log_warn "About to uninstall AntiHub-ALL"
     echo ""
 
     prepare_compose
 
-    log_warn "卸载将停止并删除容器/网络；可选删除数据卷（会清空数据库数据）"
-    read -p "是否同时删除数据卷（数据库/缓存）？(y/N): " -n 1 -r
+    log_warn "Uninstall will stop and remove containers/networks; optionally delete data volumes (will erase database data)"
+    read -p "Also delete data volumes (database/cache)? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        log_warn "删除数据卷中（不可恢复）..."
+        log_warn "Deleting data volumes (irreversible)..."
         compose down -v --remove-orphans 2>/dev/null || true
     else
-        log_info "保留数据卷..."
+        log_info "Keeping data volumes..."
         compose down --remove-orphans 2>/dev/null || true
     fi
 
     if [ -f .env ]; then
-        read -p "是否删除本地 .env 配置文件？(y/N): " -n 1 -r
+        read -p "Delete local .env configuration file? (y/N): " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             rm -f .env
-            log_info ".env 已删除"
+            log_info ".env deleted"
         else
-            log_info "保留 .env"
+            log_info "Keeping .env"
         fi
     fi
 
-    log_info "卸载完成"
+    log_info "Uninstall complete"
     echo ""
 }
 
 show_menu() {
     echo ""
-    log_info "请选择要执行的操作："
-    echo "  1) 一键部署（首次部署/重装）"
-    echo "  2) 升级（仅升级 web/backend，不操作数据库）"
-    echo "  3) 卸载（停止并删除容器，可选删除数据卷）"
-    echo "  0) 退出"
+    log_info "Select an operation:"
+    echo "  1) One-click deploy (first-time deployment / reinstall)"
+    echo "  2) Upgrade (web/backend only, database will not be modified)"
+    echo "  3) Uninstall (stop and remove containers, optionally delete data volumes)"
+    echo "  0) Exit"
     echo ""
 
     while true; do
-        read -p "请输入序号 [0-3]: " choice
+        read -p "Enter selection [0-3]: " choice
         choice=${choice//$'\r'/}
         case "$choice" in
             1) deploy; break ;;
             2) upgrade; break ;;
             3) uninstall; break ;;
-            0) log_info "已退出"; exit 0 ;;
-            *) log_warn "无效选择，请输入 0/1/2/3" ;;
+            0) log_info "Exited"; exit 0 ;;
+            *) log_warn "Invalid selection, please enter 0/1/2/3" ;;
         esac
     done
 }
@@ -626,20 +626,20 @@ case "${1:-}" in
         uninstall
         ;;
     -h|--help|help)
-        echo "Usage: ./deploy.sh [deploy|upgrade|uninstall]"
-        echo "  deploy     一键部署（首次部署/重装）"
-        echo "  upgrade    升级（仅升级 web/backend，不操作数据库）"
-        echo "  uninstall  卸载（停止并删除容器，可选删除数据卷）"
+        echo "Usage: ./deploy-en.sh [deploy|upgrade|uninstall]"
+        echo "  deploy     One-click deploy (first-time deployment / reinstall)"
+        echo "  upgrade    Upgrade (web/backend only, database will not be modified)"
+        echo "  uninstall  Uninstall (stop and remove containers, optionally delete data volumes)"
         echo ""
-        echo "不传参数会进入交互菜单。"
+        echo "Run without arguments to enter the interactive menu."
         ;;
     "")
         show_menu
         ;;
     *)
-        log_warn "未知参数: $1"
-        echo "可用参数: deploy | upgrade | uninstall | --help"
-        echo "或直接运行进入交互菜单。"
+        log_warn "Unknown argument: $1"
+        echo "Available arguments: deploy | upgrade | uninstall | --help"
+        echo "Or run without arguments to enter the interactive menu."
         exit 1
         ;;
 esac

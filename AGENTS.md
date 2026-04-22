@@ -33,8 +33,8 @@ Module development (run inside each folder):
 - Backend: `cd AntiHub-Backend && uv sync && uv run uvicorn app.main:app --reload`
 - Desktop (AntiHook): `cd AntiHook && npm install && npm run tauri dev` (frontend-only build: `npm run build`)
 
-**AntiHub 对接备注：**
-AntiHub-plugin：✅ 旧 Node plugin 已合并进 Backend；`AntiHub-plugin/` 仅作为迁移助手（Env Exporter），运行时默认不部署
+**AntiHub Integration Notes:**
+AntiHub-plugin: ✅ The old Node plugin has been merged into Backend; `AntiHub-plugin/` serves only as a migration assistant (Env Exporter) and is not deployed by default at runtime.
 
 ## Coding Style & Naming Conventions
 
